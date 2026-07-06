@@ -92,7 +92,56 @@ func (h *Handler) GoogleLogin(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "success",
-		"token":  req.Token,
 		"user":   user,
+		"token":  "dummy-jwt-for-prototype",
 	})
+}
+
+func (h *Handler) GetUserProfile(c *gin.Context) {
+	googleId := c.Param("id")
+	if googleId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing user ID"})
+		return
+	}
+
+	var user models.User
+	err := h.db.Collection("users").FindOne(context.Background(), bson.M{"googleId": googleId}).Decode(&user)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) UpdateUserProfile(c *gin.Context) {
+	googleId := c.Param("id")
+	if googleId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing user ID"})
+		return
+	}
+
+	var req struct {
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatarUrl"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"name":      req.Name,
+			"avatarUrl": req.AvatarURL,
+		},
+	}
+
+	_, err := h.db.Collection("users").UpdateOne(context.Background(), bson.M{"googleId": googleId}, update)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pixel1000/server/internal/models"
 )
 
 const (
@@ -27,18 +28,14 @@ type Client struct {
 	Conn   *websocket.Conn
 	Send   chan []byte
 	UserID string
+	Name   string
+	Avatar string
 	Role   string // "teamA", "teamB", "judge", "spectator"
 }
 
 type WsMessage struct {
-	Type    string          `json:"type"` // "draw", "chat", "grid_sync"
+	Type    string          `json:"type"` // "draw_stroke", "chat", "stroke_sync"
 	Payload json.RawMessage `json:"payload"`
-}
-
-type DrawPayload struct {
-	X     int    `json:"x"`
-	Y     int    `json:"y"`
-	Color string `json:"color"`
 }
 
 func (c *Client) ReadPump() {
@@ -65,16 +62,13 @@ func (c *Client) ReadPump() {
 			continue
 		}
 
-		if wsMsg.Type == "draw" {
-			var draw DrawPayload
-			if err := json.Unmarshal(wsMsg.Payload, &draw); err == nil {
-				// Validate bounds
-				if draw.X >= 0 && draw.X < 256 && draw.Y >= 0 && draw.Y < 256 {
-					c.Room.mu.Lock()
-					c.Room.Grid[draw.X][draw.Y] = draw.Color
-					c.Room.mu.Unlock()
-					c.Room.Broadcast <- message
-				}
+		if wsMsg.Type == "draw_stroke" {
+			var stroke models.Stroke
+			if err := json.Unmarshal(wsMsg.Payload, &stroke); err == nil {
+				c.Room.mu.Lock()
+				c.Room.Strokes = append(c.Room.Strokes, stroke)
+				c.Room.mu.Unlock()
+				c.Room.Broadcast <- message
 			}
 		} else if wsMsg.Type == "switch_role" {
 			var rolePayload struct {
@@ -83,46 +77,80 @@ func (c *Client) ReadPump() {
 			if err := json.Unmarshal(wsMsg.Payload, &rolePayload); err == nil {
 				c.Room.mu.Lock()
 				c.Role = rolePayload.Role
-				// Broadcast state update
-				stateBytes, _ := json.Marshal(c.Room.State)
-				msg, _ := json.Marshal(map[string]interface{}{
-					"type": "state_update",
-					"payload": json.RawMessage(stateBytes),
-				})
 				c.Room.mu.Unlock()
-				c.Room.Broadcast <- msg
+				go c.Room.BroadcastState()
 			}
 		} else if wsMsg.Type == "start_game" {
 			c.Room.mu.Lock()
-			if c.Room.State.Status == "lobby" {
+			if c.Room.State.Status == "lobby" && c.Room.State.AdminID == c.UserID {
 				words := []string{"APPLE", "HOUSE", "DRAGON", "COMPUTER", "GUITAR", "OCEAN", "ROCKET", "CASTLE", "BICYCLE", "ASTRONAUT", "PIZZA"}
 				c.Room.State.Status = "playing"
 				c.Room.State.CurrentRound = 1
 				c.Room.State.ActiveTeam = "teamA"
 				
+				// Assign active player
+				for client := range c.Room.Clients {
+					if client.Role == "teamA" {
+						c.Room.State.ActivePlayerID = client.UserID
+						break
+					}
+				}
+				
 				// Pick random word
 				c.Room.State.CurrentWord = words[rand.Intn(len(words))]
 			}
-			stateBytes, _ := json.Marshal(c.Room.State)
-			msg, _ := json.Marshal(map[string]interface{}{
-				"type": "state_update",
-				"payload": json.RawMessage(stateBytes),
-			})
 			c.Room.mu.Unlock()
-			c.Room.Broadcast <- msg
+			go c.Room.BroadcastState()
 		} else if wsMsg.Type == "end_turn" {
 			c.Room.mu.Lock()
 			if c.Room.State.Status == "playing" {
 				// Transition to judging for now
 				c.Room.State.Status = "judging"
 			}
-			stateBytes, _ := json.Marshal(c.Room.State)
-			msg, _ := json.Marshal(map[string]interface{}{
-				"type": "state_update",
-				"payload": json.RawMessage(stateBytes),
-			})
 			c.Room.mu.Unlock()
-			c.Room.Broadcast <- msg
+			go c.Room.BroadcastState()
+		} else if wsMsg.Type == "submit_score" {
+			var scorePayload struct {
+				Score int `json:"score"`
+			}
+			if err := json.Unmarshal(wsMsg.Payload, &scorePayload); err == nil {
+				c.Room.mu.Lock()
+				if c.Role == "judge" && c.Room.State.Status == "judging" {
+					c.Room.Scores[c.Room.State.ActiveTeam] += scorePayload.Score
+					
+					// Swap team
+					if c.Room.State.ActiveTeam == "teamA" {
+						c.Room.State.ActiveTeam = "teamB"
+					} else {
+						c.Room.State.ActiveTeam = "teamA"
+						c.Room.State.CurrentRound++
+					}
+
+					if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
+						c.Room.State.Status = "finished"
+						go c.Room.UpdateStats()
+					} else {
+						c.Room.State.Status = "playing"
+						words := []string{"APPLE", "HOUSE", "DRAGON", "COMPUTER", "GUITAR", "OCEAN", "ROCKET", "CASTLE", "BICYCLE", "ASTRONAUT", "PIZZA", "MOUNTAIN", "GALAXY", "ELEPHANT", "ROBOT"}
+						c.Room.State.CurrentWord = words[rand.Intn(len(words))]
+						
+						// Assign random active player from the new active team
+						var teamMembers []string
+						for client := range c.Room.Clients {
+							if client.Role == c.Room.State.ActiveTeam {
+								teamMembers = append(teamMembers, client.UserID)
+							}
+						}
+						if len(teamMembers) > 0 {
+							c.Room.State.ActivePlayerID = teamMembers[rand.Intn(len(teamMembers))]
+						} else {
+							c.Room.State.ActivePlayerID = ""
+						}
+					}
+				}
+				c.Room.mu.Unlock()
+				go c.Room.BroadcastState()
+			}
 		} else {
 			c.Room.Broadcast <- message
 		}

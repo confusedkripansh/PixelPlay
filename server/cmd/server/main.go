@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"time"
@@ -17,6 +18,9 @@ import (
 )
 
 func main() {
+	// Initialize random seed
+	rand.Seed(time.Now().UnixNano())
+
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, relying on environment variables")
@@ -39,8 +43,7 @@ func main() {
 	db := client.Database("pixel1000")
 	log.Println("Connected to MongoDB")
 
-	// Initialize WebSocket Hub
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(client.Database("pixel1000"))
 
 	// Initialize Auth Handler
 	authHandler := auth.NewHandler(db)
@@ -68,6 +71,8 @@ func main() {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/google", authHandler.GoogleLogin)
+		api.GET("/user/profile/:id", authHandler.GetUserProfile)
+		api.POST("/user/update/:id", authHandler.UpdateUserProfile)
 	}
 
 	// WebSocket Route

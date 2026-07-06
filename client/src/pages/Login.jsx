@@ -29,7 +29,6 @@ const Login = () => {
             style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
           />
         </div>
-        
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <GoogleLogin
             onSuccess={async (credentialResponse) => {
@@ -45,7 +44,7 @@ const Login = () => {
                 const data = await res.json();
                 if (data.status === 'success') {
                   console.log("Logged in:", data.user);
-                  // Normally you would save user/token to state management here
+                  localStorage.setItem('pixel_user', JSON.stringify(data.user));
                   navigate('/lobby');
                 }
               } catch (e) {

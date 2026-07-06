@@ -4,15 +4,33 @@ type RoomSettings struct {
 	MaxRounds        int    `json:"maxRounds"`
 	Mode             string `json:"mode"` // "time_limit" or "round_limit"
 	TimeLimitSeconds int    `json:"timeLimitSeconds"`
-	PixelsPerTurn    int    `json:"pixelsPerTurn"`
+}
+
+type PlayerInfo struct {
+	UserID string `json:"userId"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+}
+
+type Stroke struct {
+	X0    float64 `json:"x0"`
+	Y0    float64 `json:"y0"`
+	X1    float64 `json:"x1"`
+	Y1    float64 `json:"y1"`
+	Color string  `json:"color"`
 }
 
 type GameState struct {
-	Status         string `json:"status"` // "lobby", "drawing", "judging", "finished"
-	CurrentRound   int    `json:"currentRound"`
-	ActiveTeam     string `json:"activeTeam"` // "A" or "B"
-	ActivePlayerID string `json:"activePlayerId"`
-	CurrentWord    string `json:"currentWord,omitempty"`
+	Status         string       `json:"status"` // "lobby", "drawing", "judging", "finished"
+	CurrentRound   int          `json:"currentRound"`
+	ActiveTeam     string       `json:"activeTeam"` // "A" or "B"
+	ActivePlayerID string       `json:"activePlayerId"`
+	CurrentWord    string       `json:"currentWord,omitempty"`
+	AdminID        string       `json:"AdminID,omitempty"`
+	TeamA          []PlayerInfo   `json:"teamA"`
+	TeamB          []PlayerInfo   `json:"teamB"`
+	Judges         []PlayerInfo   `json:"judges"`
+	Scores         map[string]int `json:"scores"`
 }
 
 type Room struct {
@@ -36,7 +54,6 @@ func NewRoom(id, password, adminId string) *Room {
 			MaxRounds:        3,
 			Mode:             "round_limit",
 			TimeLimitSeconds: 60,
-			PixelsPerTurn:    3,
 		},
 		State: GameState{
 			Status:       "lobby",

@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"log"
-	"math/rand"
+	// "math/rand"
 	"net/http"
 	"os"
-	"time"
+	// "time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -18,8 +18,6 @@ import (
 )
 
 func main() {
-	// Initialize random seed
-	rand.Seed(time.Now().UnixNano())
 
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {

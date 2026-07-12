@@ -1,0 +1,17 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Go
+/server/server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out

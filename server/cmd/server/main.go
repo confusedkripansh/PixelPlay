@@ -10,10 +10,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/pixel1000/server/internal/auth"
+	"github.com/pixel1000/server/internal/handlers"
+	"github.com/pixel1000/server/internal/platform/database"
+	"github.com/pixel1000/server/internal/services"
 	"github.com/pixel1000/server/internal/websocket"
 )
 
@@ -26,27 +26,24 @@ func main() {
 		log.Println("No .env file found, relying on environment variables")
 	}
 
-	// Connect to MongoDB
+	// Connect to MongoDB using the platform layer
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
 		mongoURI = "mongodb://localhost:27017"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	
+	db, client, err := database.Connect(mongoURI, "pixel1000")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer client.Disconnect(context.Background())
 
-	db := client.Database("pixel1000")
-	log.Println("Connected to MongoDB")
+	// Initialize Services
+	userService := services.NewUserService(db)
 
-	hub := websocket.NewHub(client.Database("pixel1000"))
-
-	// Initialize Auth Handler
-	authHandler := auth.NewHandler(db)
+	// Initialize Handlers
+	authHandler := handlers.NewAuthHandler(userService)
+	hub := websocket.NewHub(userService)
 
 	r := gin.Default()
 

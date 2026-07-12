@@ -30,7 +30,8 @@ type Client struct {
 	UserID string
 	Name   string
 	Avatar string
-	Role   string // "teamA", "teamB", "judge", "spectator"
+	Role            string // "teamA", "teamB", "judge", "spectator"
+	IsAuthenticated bool
 }
 
 type WsMessage struct {
@@ -58,7 +59,34 @@ func (c *Client) ReadPump() {
 
 		var wsMsg WsMessage
 		if err := json.Unmarshal(message, &wsMsg); err != nil {
-			log.Println("Invalid JSON:", err)
+			log.Println("Invalid message format:", err)
+			continue
+		}
+
+		if !c.IsAuthenticated {
+			if wsMsg.Type == "authenticate" {
+				var authPayload struct {
+					Password string `json:"password"`
+				}
+				json.Unmarshal(wsMsg.Payload, &authPayload)
+
+				c.Room.mu.Lock()
+				if c.Room.Password == "" {
+					c.Room.Password = authPayload.Password
+					c.Room.State.AdminID = c.UserID
+					c.IsAuthenticated = true
+				} else if c.Room.Password == authPayload.Password {
+					c.IsAuthenticated = true
+				}
+				c.Room.mu.Unlock()
+
+				if c.IsAuthenticated {
+					c.Room.Register <- c
+				} else {
+					c.Conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","payload":{"message":"Invalid password"}}`))
+					break
+				}
+			}
 			continue
 		}
 

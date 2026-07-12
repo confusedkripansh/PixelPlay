@@ -26,16 +26,25 @@ const Room = () => {
     wsUrl.searchParams.append('userId', user.googleId);
     wsUrl.searchParams.append('name', user.name || 'Guest');
     wsUrl.searchParams.append('avatar', user.avatarUrl || 'https://robohash.org/guest');
-    if (password) {
-      wsUrl.searchParams.append('password', password);
-    }
+    
     const ws = new WebSocket(wsUrl.toString());
     wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'authenticate',
+        payload: { password: password || '' }
+      }));
+    };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
+          case 'error':
+            alert(msg.payload.message || 'Connection error');
+            navigate('/lobby');
+            break;
           case 'stroke_sync':
             if (canvasRef.current && Array.isArray(msg.payload)) {
               canvasRef.current.syncFullStrokes(msg.payload);

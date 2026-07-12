@@ -9,9 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pixel1000/server/internal/models"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/pixel1000/server/internal/services"
 )
 
 var upgrader = websocket.Upgrader{
@@ -34,11 +32,11 @@ type Room struct {
 	TeamB      []*Client
 	Judges     []*Client
 	Scores     map[string]int
-	DB         *mongo.Database
+	UserService services.UserService
 	mu         sync.Mutex // Protect state writes
 }
 
-func NewRoom(id string, db *mongo.Database) *Room {
+func NewRoom(id string, userService services.UserService) *Room {
 	room := &Room{
 		ID:         id,
 		Clients:    make(map[*Client]bool),
@@ -56,7 +54,7 @@ func NewRoom(id string, db *mongo.Database) *Room {
 		},
 		Scores:  map[string]int{"teamA": 0, "teamB": 0},
 		Strokes: []models.Stroke{},
-		DB:      db,
+		UserService: userService,
 	}
 	return room
 }
@@ -150,14 +148,14 @@ func (r *Room) Run() {
 
 type Hub struct {
 	Rooms map[string]*Room
-	DB    *mongo.Database
+	UserService services.UserService
 	mu    sync.RWMutex
 }
 
-func NewHub(db *mongo.Database) *Hub {
+func NewHub(userService services.UserService) *Hub {
 	return &Hub{
-		Rooms: make(map[string]*Room),
-		DB:    db,
+		Rooms:       make(map[string]*Room),
+		UserService: userService,
 	}
 }
 
@@ -167,14 +165,14 @@ func (h *Hub) GetOrCreateRoom(id string) *Room {
 	if room, ok := h.Rooms[id]; ok {
 		return room
 	}
-	room := NewRoom(id, h.DB)
+	room := NewRoom(id, h.UserService)
 	h.Rooms[id] = room
 	go room.Run()
 	return room
 }
 
 func (r *Room) UpdateStats() {
-	if r.DB == nil {
+	if r.UserService == nil {
 		return
 	}
 	r.mu.Lock()
@@ -192,37 +190,21 @@ func (r *Room) UpdateStats() {
 		winningTeam = "tie"
 	}
 
-	coll := r.DB.Collection("users")
-	opts := options.Update().SetUpsert(true)
-
 	for client := range r.Clients {
 		if client.UserID == "" || client.UserID[:6] == "guest-" {
 			continue // Skip guests entirely
 		}
 
-		incFields := bson.M{}
-
+		status := "tie"
 		if client.Role == "judge" {
-			// Judges just get participation XP
-			incFields["stats.experience"] = 20
-		} else {
-			// Teams get points and win/loss stats
-			won := (client.Role == winningTeam)
-			incFields["stats.experience"] = 10
-			incFields["stats.totalPoints"] = r.Scores[client.Role]
-			
-			if won {
-				incFields["stats.wins"] = 1
-				incFields["stats.experience"] = 50 // Bonus for winning
-			} else if winningTeam != "tie" {
-				incFields["stats.losses"] = 1
-			}
+			status = "judge"
+		} else if client.Role == winningTeam {
+			status = "win"
+		} else if winningTeam != "tie" {
+			status = "loss"
 		}
 
-		filter := bson.M{"googleId": client.UserID}
-		update := bson.M{"$inc": incFields}
-
-		_, err := coll.UpdateOne(context.Background(), filter, update, opts)
+		err := r.UserService.UpdateGameStats(context.Background(), client.UserID, status, r.Scores[client.Role])
 		if err != nil {
 			log.Println("Error updating stats for", client.UserID, ":", err)
 		}
@@ -234,8 +216,6 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	userId := r.URL.Query().Get("userId")
 	name := r.URL.Query().Get("name")
 	avatar := r.URL.Query().Get("avatar")
-	password := r.URL.Query().Get("password")
-	
 	if roomId == "" || userId == "" {
 		http.Error(w, "roomId and userId are required", http.StatusBadRequest)
 		return
@@ -243,19 +223,6 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	room := hub.GetOrCreateRoom(roomId)
 	
-	room.mu.Lock()
-	// Password check
-	if room.Password == "" {
-		// New room, set password and admin
-		room.Password = password
-		room.State.AdminID = userId
-	} else if room.Password != password {
-		room.mu.Unlock()
-		http.Error(w, "invalid password", http.StatusUnauthorized)
-		return
-	}
-	room.mu.Unlock()
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
@@ -263,15 +230,15 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{
-		Room:   room, 
-		Conn:   conn, 
-		Send:   make(chan []byte, 256), 
-		UserID: userId,
-		Name:   name,
-		Avatar: avatar,
-		Role:   "teamA", // default role
+		Room:            room, 
+		Conn:            conn, 
+		Send:            make(chan []byte, 256), 
+		UserID:          userId,
+		Name:            name,
+		Avatar:          avatar,
+		Role:            "teamA", // default role
+		IsAuthenticated: false,   // Must authenticate via WS message
 	}
-	client.Room.Register <- client
 
 	go client.WritePump()
 	go client.ReadPump()

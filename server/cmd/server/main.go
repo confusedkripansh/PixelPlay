@@ -14,6 +14,7 @@ import (
 
 	// Internal packages we wrote for this project
 	"github.com/pixel1000/server/internal/handlers"
+	"github.com/pixel1000/server/internal/middlewares"
 	"github.com/pixel1000/server/internal/platform/database"
 	"github.com/pixel1000/server/internal/services"
 	"github.com/pixel1000/server/internal/websocket"
@@ -55,21 +56,8 @@ func main() {
 	// Create a default Gin router engine (similar to const app = express()).
 	r := gin.Default()
 
-	// r.Use attaches "Middleware" that runs on every single incoming HTTP request.
-	r.Use(func(c *gin.Context) {
-		// We set CORS (Cross-Origin Resource Sharing) headers to allow React (running on a different port) to access this API.
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
-		// If this is a preflight OPTIONS request, abort and return a 204 No Content status.
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		// c.Next() tells Gin to continue to the actual route handler (like GoogleLogin).
-		c.Next()
-	})
+	// Use our newly extracted CORS middleware
+	r.Use(middlewares.CORSMiddleware())
 
 	// Define a simple GET route for health checking.
 	r.GET("/health", func(c *gin.Context) {
@@ -77,12 +65,19 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Group routes under the "/api" prefix (e.g. /api/auth/google)
+	// Group routes under the "/api" prefix
 	api := r.Group("/api")
 	{
+		// Public routes (anyone can hit this to get a token)
 		api.POST("/auth/google", authHandler.GoogleLogin)
-		api.GET("/user/profile/:id", authHandler.GetUserProfile)
-		api.POST("/user/update/:id", authHandler.UpdateUserProfile)
+		
+		// Protected routes (you MUST have a valid JWT token in your headers to access these)
+		protected := api.Group("/user")
+		protected.Use(middlewares.JWTAuthMiddleware())
+		{
+			protected.GET("/profile/:id", authHandler.GetUserProfile)
+			protected.POST("/update/:id", authHandler.UpdateUserProfile)
+		}
 	}
 
 	// Define the WebSocket route. When a user hits /ws, we upgrade them to a persistent socket.

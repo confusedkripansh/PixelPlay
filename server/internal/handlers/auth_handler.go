@@ -3,6 +3,8 @@ package handlers
 import (
 	"context" // Used for passing request-scoped data and cancellation signals to the Service layer.
 	"net/http" // Provides standard HTTP status codes (like http.StatusOK, http.StatusBadRequest).
+	"os"
+	"time"
 
 	"github.com/gin-gonic/gin" // Gin is our web framework. It handles routing and HTTP requests.
 	"github.com/golang-jwt/jwt/v5" // A library to parse JSON Web Tokens (JWTs) sent by Google.
@@ -79,11 +81,24 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		return
 	}
 
+	// Generate a real JWT token signed by our server
+	serverSecret := os.Getenv("JWT_SECRET")
+	var tokenString string
+	if serverSecret != "" {
+		serverToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": user.GoogleID,
+			"exp": time.Now().Add(time.Hour * 24).Unix(), // Expires in 24 hours
+		})
+		tokenString, _ = serverToken.SignedString([]byte(serverSecret))
+	} else {
+		tokenString = "dummy-jwt-for-prototype" // Fallback if no secret exists
+	}
+
 	// Everything worked! Send a 200 OK HTTP response with the populated user data.
 	c.JSON(http.StatusOK, gin.H{
 		"status": "success",
 		"user":   user,
-		"token":  "dummy-jwt-for-prototype",
+		"token":  tokenString,
 	})
 }
 

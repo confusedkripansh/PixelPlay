@@ -34,6 +34,7 @@ type GameState struct {
 	Judges         []PlayerInfo   `json:"judges"`
 	Scores         map[string]int `json:"scores"`
 	UsedWords      []string       `json:"usedWords,omitempty"`
+	Settings       RoomSettings   `json:"settings"`
 }
 
 type Room struct {

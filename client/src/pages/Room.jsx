@@ -15,11 +15,24 @@ const Room = () => {
   const [serverState, setServerState] = useState(null);
   const [timeLeft, setTimeLeft] = useState(15);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [sliderTime, setSliderTime] = useState(60);
+  const [sliderInk, setSliderInk] = useState(1000);
   
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
 
   const user = JSON.parse(localStorage.getItem('pixel_user')) || { googleId: 'guest-' + Math.random(), name: 'Guest', avatarUrl: 'https://robohash.org/guest' };
+
+  useEffect(() => {
+    if (serverState?.settings) {
+      if (serverState.settings.timeLimitSeconds) {
+        setSliderTime(serverState.settings.timeLimitSeconds);
+      }
+      if (serverState.settings.inkLimit) {
+        setSliderInk(serverState.settings.inkLimit);
+      }
+    }
+  }, [serverState?.settings?.timeLimitSeconds, serverState?.settings?.inkLimit]);
 
   useEffect(() => {
     let isMounted = true;
@@ -149,6 +162,18 @@ const Room = () => {
         }
       }));
     }
+  };
+
+  const handleSliderTimeChange = (val) => {
+    const num = Number(val);
+    setSliderTime(num);
+    handleUpdateSettings(num, sliderInk);
+  };
+
+  const handleSliderInkChange = (val) => {
+    const num = Number(val);
+    setSliderInk(num);
+    handleUpdateSettings(sliderTime, num);
   };
 
   const handleLeaveRoom = () => {
@@ -325,15 +350,15 @@ const Room = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
                       <span>Drawing Time:</span>
-                      <strong>{serverState?.settings?.timeLimitSeconds || 60} seconds</strong>
+                      <strong>{sliderTime} seconds</strong>
                     </div>
                     <input 
                       type="range" 
                       min="15" 
                       max="120" 
                       step="5"
-                      value={serverState?.settings?.timeLimitSeconds || 60} 
-                      onChange={(e) => handleUpdateSettings(e.target.value, serverState?.settings?.inkLimit || 1000)}
+                      value={sliderTime} 
+                      onChange={(e) => handleSliderTimeChange(e.target.value)}
                       style={{ width: '100%', cursor: 'pointer' }}
                     />
                   </div>
@@ -341,15 +366,15 @@ const Room = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
                       <span>Ink Granted per Turn:</span>
-                      <strong>{serverState?.settings?.inkLimit || 1000} pixels</strong>
+                      <strong>{sliderInk} pixels</strong>
                     </div>
                     <input 
                       type="range" 
                       min="400" 
                       max="3000" 
                       step="100"
-                      value={serverState?.settings?.inkLimit || 1000} 
-                      onChange={(e) => handleUpdateSettings(serverState?.settings?.timeLimitSeconds || 60, e.target.value)}
+                      value={sliderInk} 
+                      onChange={(e) => handleSliderInkChange(e.target.value)}
                       style={{ width: '100%', cursor: 'pointer' }}
                     />
                   </div>

@@ -91,6 +91,7 @@ func (r *Room) GetFullState() models.GameState {
 	state.TeamB = []models.PlayerInfo{}
 	state.Judges = []models.PlayerInfo{}
 	state.Scores = r.Scores
+	state.Settings = r.Settings
 
 	// 1. Add active local clients
 	for client := range r.Clients {

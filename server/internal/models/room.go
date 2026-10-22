@@ -4,12 +4,14 @@ type RoomSettings struct {
 	MaxRounds        int    `json:"maxRounds"`
 	Mode             string `json:"mode"` // "time_limit" or "round_limit"
 	TimeLimitSeconds int    `json:"timeLimitSeconds"`
+	InkLimit         int    `json:"inkLimit"` // Ink/pixels granted per turn (e.g. 500 - 3000)
 }
 
 type PlayerInfo struct {
-	UserID string `json:"userId"`
-	Name   string `json:"name"`
-	Avatar string `json:"avatar"`
+	UserID         string `json:"userId"`
+	Name           string `json:"name"`
+	Avatar         string `json:"avatar"`
+	IsDisconnected bool   `json:"isDisconnected,omitempty"`
 }
 
 type Stroke struct {
@@ -31,6 +33,7 @@ type GameState struct {
 	TeamB          []PlayerInfo   `json:"teamB"`
 	Judges         []PlayerInfo   `json:"judges"`
 	Scores         map[string]int `json:"scores"`
+	UsedWords      []string       `json:"usedWords,omitempty"`
 }
 
 type Room struct {
@@ -45,6 +48,15 @@ type Room struct {
 	Scores   map[string]int `json:"scores"` // "teamA": score, "teamB": score
 }
 
+// CachedRoom is the serialized format saved in Redis to preserve room state across servers.
+type CachedRoom struct {
+	Password string         `json:"password"`
+	AdminID  string         `json:"adminId"`
+	Settings RoomSettings   `json:"settings"`
+	State    GameState      `json:"state"`
+	Scores   map[string]int `json:"scores"`
+}
+
 func NewRoom(id, password, adminId string) *Room {
 	return &Room{
 		RoomID:   id,
@@ -54,10 +66,12 @@ func NewRoom(id, password, adminId string) *Room {
 			MaxRounds:        3,
 			Mode:             "round_limit",
 			TimeLimitSeconds: 60,
+			InkLimit:         1000,
 		},
 		State: GameState{
 			Status:       "lobby",
 			CurrentRound: 0,
+			UsedWords:    []string{},
 		},
 		TeamA:  []string{},
 		TeamB:  []string{},

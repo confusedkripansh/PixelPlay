@@ -15,6 +15,7 @@ import (
 	// Internal packages we wrote for this project
 	"github.com/pixel1000/server/internal/handlers"
 	"github.com/pixel1000/server/internal/middlewares"
+	"github.com/pixel1000/server/internal/platform/cache"
 	"github.com/pixel1000/server/internal/platform/database"
 	"github.com/pixel1000/server/internal/services"
 	"github.com/pixel1000/server/internal/websocket"
@@ -49,9 +50,17 @@ func main() {
 	// DEPENDENCY INJECTION: We pass the raw database pointer into the UserService.
 	userService := services.NewUserService(db)
 
+	// PLATFORM: Connect to Redis for horizontal scaling Pub/Sub and distributed room state
+	redisAddr := os.Getenv("REDIS_ADDR")
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisClient, err := cache.NewRedisClient(redisAddr, redisPassword, 0)
+	if err != nil {
+		log.Printf("Redis notice: %v (running with local in-memory fallback)", err)
+	}
+
 	// DEPENDENCY INJECTION: We pass the UserService into the Handlers so they can use it without touching the database directly.
 	authHandler := handlers.NewAuthHandler(userService)
-	hub := websocket.NewHub(userService)
+	hub := websocket.NewHub(userService, redisClient)
 
 	// Create a default Gin router engine (similar to const app = express()).
 	r := gin.Default()

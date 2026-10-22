@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"math/rand"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pixel1000/server/internal/models"
+	"github.com/pixel1000/server/internal/platform/words"
 )
 
 const (
@@ -88,11 +90,32 @@ func (c *Client) ReadPump() {
 				json.Unmarshal(wsMsg.Payload, &authPayload)
 
 				c.Room.mu.Lock()
+				// If room password is not in this instance's memory, check Redis in case another server created it
+				if c.Room.Password == "" && c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+					var cached models.CachedRoom
+					if err := c.Room.RedisClient.GetRoomState(context.Background(), c.Room.ID, &cached); err == nil && cached.Password != "" {
+						c.Room.Password = cached.Password
+						c.Room.State.AdminID = cached.AdminID
+					}
+				}
+
 				if c.Room.Password == "" {
 					// First person to join sets the password and becomes admin.
 					c.Room.Password = authPayload.Password
 					c.Room.State.AdminID = c.UserID
 					c.IsAuthenticated = true
+
+					// Sync password and admin state to Redis
+					if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+						cached := models.CachedRoom{
+							Password: c.Room.Password,
+							AdminID:  c.Room.State.AdminID,
+							Settings: c.Room.Settings,
+							State:    c.Room.State,
+							Scores:   c.Room.Scores,
+						}
+						_ = c.Room.RedisClient.SetRoomState(context.Background(), c.Room.ID, cached, 2*time.Hour)
+					}
 				} else if c.Room.Password == authPayload.Password {
 					c.IsAuthenticated = true
 				}
@@ -115,6 +138,12 @@ func (c *Client) ReadPump() {
 				c.Room.mu.Lock()
 				c.Room.Strokes = append(c.Room.Strokes, stroke)
 				c.Room.mu.Unlock()
+
+				// Record stroke to Redis so late-joiners and reconnecting players fetch it
+				if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+					_ = c.Room.RedisClient.AppendStroke(context.Background(), c.Room.ID, stroke)
+				}
+
 				c.Room.Broadcast <- message // Send the stroke to everyone else to render.
 			}
 		} else if wsMsg.Type == "switch_role" {
@@ -127,11 +156,35 @@ func (c *Client) ReadPump() {
 				c.Room.mu.Unlock()
 				go c.Room.BroadcastState() // Tell everyone their role changed.
 			}
+		} else if wsMsg.Type == "update_settings" {
+			var settingsPayload struct {
+				TimeLimitSeconds int `json:"timeLimitSeconds"`
+				InkLimit         int `json:"inkLimit"`
+				MaxRounds        int `json:"maxRounds"`
+			}
+			if err := json.Unmarshal(wsMsg.Payload, &settingsPayload); err == nil {
+				c.Room.mu.Lock()
+				// Only the Room Owner / Admin is allowed to modify room settings!
+				if c.UserID == c.Room.State.AdminID {
+					if settingsPayload.TimeLimitSeconds >= 10 && settingsPayload.TimeLimitSeconds <= 300 {
+						c.Room.Settings.TimeLimitSeconds = settingsPayload.TimeLimitSeconds
+					}
+					if settingsPayload.InkLimit >= 100 && settingsPayload.InkLimit <= 10000 {
+						c.Room.Settings.InkLimit = settingsPayload.InkLimit
+					}
+					if settingsPayload.MaxRounds >= 1 && settingsPayload.MaxRounds <= 20 {
+						c.Room.Settings.MaxRounds = settingsPayload.MaxRounds
+					}
+					log.Printf("Room %s settings updated: TimeLimit=%ds, InkLimit=%d, MaxRounds=%d",
+						c.Room.ID, c.Room.Settings.TimeLimitSeconds, c.Room.Settings.InkLimit, c.Room.Settings.MaxRounds)
+				}
+				c.Room.mu.Unlock()
+				go c.Room.BroadcastState()
+			}
 		} else if wsMsg.Type == "start_game" {
 			c.Room.mu.Lock()
 			// Only the Admin can start the game from the lobby.
 			if c.Room.State.Status == "lobby" && c.Room.State.AdminID == c.UserID {
-				words := []string{"APPLE", "HOUSE", "DRAGON", "COMPUTER", "GUITAR", "OCEAN", "ROCKET", "CASTLE", "BICYCLE", "ASTRONAUT", "PIZZA"}
 				c.Room.State.Status = "playing"
 				c.Room.State.CurrentRound = 1
 				c.Room.State.ActiveTeam = "teamA"
@@ -144,8 +197,10 @@ func (c *Client) ReadPump() {
 					}
 				}
 				
-				// Pick a random word for the round.
-				c.Room.State.CurrentWord = words[rand.Intn(len(words))]
+				// Pick a fresh, precise word from our 320+ curated dictionary
+				nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+				c.Room.State.CurrentWord = nextWord
+				c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
 			}
 			c.Room.mu.Unlock()
 			go c.Room.BroadcastState()
@@ -180,8 +235,11 @@ func (c *Client) ReadPump() {
 						go c.Room.UpdateStats() // Update MongoDB!
 					} else {
 						c.Room.State.Status = "playing"
-						words := []string{"APPLE", "HOUSE", "DRAGON", "COMPUTER", "GUITAR", "OCEAN", "ROCKET", "CASTLE", "BICYCLE", "ASTRONAUT", "PIZZA", "MOUNTAIN", "GALAXY", "ELEPHANT", "ROBOT"}
-						c.Room.State.CurrentWord = words[rand.Intn(len(words))]
+						
+						// Pick a fresh, precise word without repeating
+						nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+						c.Room.State.CurrentWord = nextWord
+						c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
 						
 						// Assign a random player from the new active team to draw.
 						var teamMembers []string

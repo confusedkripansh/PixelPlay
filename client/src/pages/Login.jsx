@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config';
 
 const Login = () => {
   const [inGameName, setInGameName] = useState('');
@@ -33,7 +34,7 @@ const Login = () => {
           <GoogleLogin
             onSuccess={async (credentialResponse) => {
               try {
-                const res = await fetch('http://localhost:8080/api/auth/google', {
+                const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({

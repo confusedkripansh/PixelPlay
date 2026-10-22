@@ -19,18 +19,36 @@ type UserService interface {
 	GetUserProfile(ctx context.Context, googleId string) (*models.User, error)
 	UpdateUserProfile(ctx context.Context, googleId, name, avatarUrl string) error
 	UpdateGameStats(ctx context.Context, googleId string, status string, points int) error
+	QueueGameStatsUpdate(googleId string, status string, points int)
 }
 
 // userService is a Struct. Go does not have "classes". Structs are how we define objects.
 // Note the lowercase 'u'. In Go, lowercase means it is "Private" (hidden from other packages).
 // The only way other packages can use this struct is through the public interface above.
 type userService struct {
-	db *mongo.Database // A pointer to the MongoDB database object.
+	db     *mongo.Database // A pointer to the MongoDB database object.
+	worker *StatsWorkerPool // Asynchronous worker pool for high-concurrency writes.
 }
 
 // NewUserService is a constructor function. It takes the database pointer and returns the Interface.
 func NewUserService(db *mongo.Database) UserService {
-	return &userService{db: db}
+	svc := &userService{
+		db:     db,
+		worker: NewStatsWorkerPool(10000, 10), // Buffer of 10k jobs, 10 concurrent DB writers
+	}
+	svc.worker.Start(svc)
+	return svc
+}
+
+// QueueGameStatsUpdate pushes stat updates to the async worker pool without blocking the caller.
+func (s *userService) QueueGameStatsUpdate(googleId string, status string, points int) {
+	if s.worker != nil {
+		s.worker.Enqueue(StatUpdateJob{
+			GoogleID: googleId,
+			Status:   status,
+			Points:   points,
+		})
+	}
 }
 
 // "func (s *userService)" is a Receiver. This means UpsertGoogleUser is a method attached to the userService struct,

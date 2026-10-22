@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -17,7 +18,7 @@ const Dashboard = () => {
     }
 
     // Fetch latest profile
-    fetch(`http://localhost:8080/api/user/profile/${user.googleId}`)
+    fetch(`${API_BASE_URL}/api/user/profile/${user.googleId}`)
       .then(res => res.json())
       .then(data => {
         if (!data.error) {
@@ -41,7 +42,7 @@ const Dashboard = () => {
 
   const handleSaveProfile = async () => {
     try {
-      const res = await fetch(`http://localhost:8080/api/user/update/${user.googleId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/user/update/${user.googleId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName, avatarUrl: editAvatar })

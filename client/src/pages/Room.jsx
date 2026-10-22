@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import Canvas from '../components/Canvas';
+import { WS_BASE_URL } from '../config';
 
 const Room = () => {
   const { roomId } = useParams();
@@ -13,6 +14,7 @@ const Room = () => {
   const [activePlayer, setActivePlayer] = useState('me'); // 'me' or 'other'
   const [serverState, setServerState] = useState(null);
   const [timeLeft, setTimeLeft] = useState(15);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
@@ -20,59 +22,88 @@ const Room = () => {
   const user = JSON.parse(localStorage.getItem('pixel_user')) || { googleId: 'guest-' + Math.random(), name: 'Guest', avatarUrl: 'https://robohash.org/guest' };
 
   useEffect(() => {
-    // Connect to WebSocket Server with userId, name, avatar, and password
-    const wsUrl = new URL(`ws://localhost:8080/ws`);
-    wsUrl.searchParams.append('roomId', roomId);
-    wsUrl.searchParams.append('userId', user.googleId);
-    wsUrl.searchParams.append('name', user.name || 'Guest');
-    wsUrl.searchParams.append('avatar', user.avatarUrl || 'https://robohash.org/guest');
-    
-    const ws = new WebSocket(wsUrl.toString());
-    wsRef.current = ws;
+    let isMounted = true;
+    let reconnectTimeout = null;
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        type: 'authenticate',
-        payload: { password: password || '' }
-      }));
-    };
+    const connect = () => {
+      const wsUrl = new URL(WS_BASE_URL);
+      wsUrl.searchParams.append('roomId', roomId);
+      wsUrl.searchParams.append('userId', user.googleId);
+      wsUrl.searchParams.append('name', user.name || 'Guest');
+      wsUrl.searchParams.append('avatar', user.avatarUrl || 'https://robohash.org/guest');
+      
+      const ws = new WebSocket(wsUrl.toString());
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        switch (msg.type) {
-          case 'error':
-            alert(msg.payload.message || 'Connection error');
-            navigate('/lobby');
-            break;
-          case 'stroke_sync':
-            if (canvasRef.current && Array.isArray(msg.payload)) {
-              canvasRef.current.syncFullStrokes(msg.payload);
-            }
-            break;
-          case 'draw_stroke':
-            if (canvasRef.current) {
-              canvasRef.current.drawRemoteStroke(msg.payload);
-            }
-            break;
-          case 'state_update':
-            setServerState(msg.payload);
-            setGameState(msg.payload.status);
-            break;
+      ws.onopen = () => {
+        if (!isMounted) return;
+        setIsReconnecting(false);
+        ws.send(JSON.stringify({
+          type: 'authenticate',
+          payload: { password: password || '' }
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          switch (msg.type) {
+            case 'error':
+              alert(msg.payload.message || 'Connection error');
+              navigate('/lobby');
+              break;
+            case 'room_terminated':
+              alert(msg.payload?.reason || 'The room was terminated because the owner left.');
+              navigate('/lobby');
+              break;
+            case 'stroke_sync':
+              if (canvasRef.current && Array.isArray(msg.payload)) {
+                canvasRef.current.syncFullStrokes(msg.payload);
+              }
+              break;
+            case 'draw_stroke':
+              if (canvasRef.current) {
+                canvasRef.current.drawRemoteStroke(msg.payload);
+              }
+              break;
+            case 'state_update':
+              setServerState(msg.payload);
+              setGameState(msg.payload.status);
+              break;
+          }
+        } catch (e) {
+          console.error("Invalid WS message:", e);
         }
-      } catch (e) {
-        console.error("Invalid WS message:", e);
-      }
+      };
+
+      ws.onclose = (event) => {
+        if (!isMounted) return;
+        // If not intentional exit and error wasn't an explicit password rejection
+        setIsReconnecting(true);
+        console.warn("WebSocket disconnected. Attempting auto-reconnect in 2 seconds...");
+        reconnectTimeout = setTimeout(() => {
+          if (isMounted) {
+            connect();
+          }
+        }, 2000);
+      };
     };
+
+    connect();
 
     return () => {
-      ws.close();
+      isMounted = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (wsRef.current) wsRef.current.close();
     };
   }, [roomId, password, user.googleId, user.name, user.avatarUrl]);
 
   useEffect(() => {
     let timer;
     if (gameState === 'playing') {
+      const initialTime = serverState?.settings?.timeLimitSeconds || 60;
+      setTimeLeft(initialTime);
+
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -87,10 +118,10 @@ const Room = () => {
         });
       }, 1000);
     } else {
-      setTimeLeft(15);
+      setTimeLeft(serverState?.settings?.timeLimitSeconds || 60);
     }
     return () => clearInterval(timer);
-  }, [gameState, serverState?.activePlayerId, user.googleId]);
+  }, [gameState, serverState?.activePlayerId, serverState?.currentRound, serverState?.settings?.timeLimitSeconds, user.googleId]);
 
   useEffect(() => {
     let redirectTimer;
@@ -105,6 +136,30 @@ const Room = () => {
   const handleStartGame = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'start_game' }));
+    }
+  };
+
+  const handleUpdateSettings = (timeLimit, inkLimit) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'update_settings',
+        payload: {
+          timeLimitSeconds: Number(timeLimit),
+          inkLimit: Number(inkLimit)
+        }
+      }));
+    }
+  };
+
+  const handleLeaveRoom = () => {
+    if (isAdmin) {
+      if (window.confirm("As room owner, leaving will terminate the room for all players. Are you sure you want to exit?")) {
+        wsRef.current?.close();
+        navigate('/lobby');
+      }
+    } else {
+      wsRef.current?.close();
+      navigate('/lobby');
     }
   };
 
@@ -141,32 +196,64 @@ const Room = () => {
 
   return (
     <div className="app-container" style={{ padding: '2rem' }}>
+      {isReconnecting && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.9)',
+          color: 'white',
+          padding: '0.75rem 1.5rem',
+          borderRadius: '8px',
+          marginBottom: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+          fontWeight: 'bold',
+          animation: 'pulse 1.5s infinite'
+        }}>
+          <span>⚠️ Connection interrupted. Automatically reconnecting to room...</span>
+        </div>
+      )}
+
       <header className="glass-panel" style={{ padding: '1rem 2rem', marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0 }}>Room: <span style={{ color: 'var(--accent-primary)' }}>{roomId}</span></h2>
           <span style={{ color: 'var(--text-secondary)' }}>Status: {gameState.toUpperCase()}</span>
         </div>
         
-        {gameState === 'lobby' && (
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Switch Role:</span>
-            <select 
-              className="btn btn-secondary" 
-              value={role} 
-              onChange={handleRoleChange}
-              style={{ background: 'rgba(0,0,0,0.2)' }}
-            >
-              <option value="teamA">Team A</option>
-              <option value="teamB">Team B</option>
-              <option value="judge">Judge</option>
-            </select>
-            {isAdmin && (
-              <button className="btn btn-primary" onClick={handleStartGame}>
-                Start Game
-              </button>
-            )}
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {gameState === 'lobby' && (
+            <>
+              <span style={{ color: 'var(--text-secondary)' }}>Switch Role:</span>
+              <select 
+                className="btn btn-secondary" 
+                value={role} 
+                onChange={handleRoleChange}
+                style={{ background: 'rgba(0,0,0,0.2)' }}
+              >
+                <option value="teamA">Team A</option>
+                <option value="teamB">Team B</option>
+                <option value="judge">Judge</option>
+              </select>
+              {isAdmin && (
+                <button className="btn btn-primary" onClick={handleStartGame}>
+                  Start Game
+                </button>
+              )}
+            </>
+          )}
+
+          <button 
+            className="btn btn-secondary" 
+            onClick={handleLeaveRoom}
+            style={{ 
+              background: 'rgba(239, 68, 68, 0.15)', 
+              borderColor: 'rgba(239, 68, 68, 0.4)', 
+              color: '#f87171' 
+            }}
+          >
+            {isAdmin ? 'End Room' : 'Leave'}
+          </button>
+        </div>
       </header>
 
       <div style={{ display: 'flex', gap: '2rem' }}>
@@ -178,9 +265,12 @@ const Room = () => {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {(serverState?.teamA || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
               {(serverState?.teamA || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
                   <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>{player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}</span>
+                  <span>
+                    {player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}
+                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -191,9 +281,12 @@ const Room = () => {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {(serverState?.teamB || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
               {(serverState?.teamB || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
                   <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>{player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}</span>
+                  <span>
+                    {player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}
+                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -204,9 +297,12 @@ const Room = () => {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {(serverState?.judges || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
               {(serverState?.judges || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
                   <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>{player.name}</span>
+                  <span>
+                    {player.name}
+                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -216,9 +312,58 @@ const Room = () => {
         {/* Main Area */}
         <div style={{ flex: '3', display: 'flex', flexDirection: 'column' }}>
           {gameState === 'lobby' ? (
-            <div className="glass-panel" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+            <div className="glass-panel" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '2rem' }}>
               <h2>Waiting for players...</h2>
-              <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>The admin will start the game when everyone is ready.</p>
+              <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '2rem' }}>
+                {isAdmin ? 'You are the Room Owner. Configure match rules below and start when ready.' : 'The room owner will start the game when all players are ready.'}
+              </p>
+
+              {isAdmin ? (
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <h3 style={{ margin: 0, color: 'var(--accent-primary)', fontSize: '1.1rem' }}>⚙️ Room Rules (Owner Controls)</h3>
+                  
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                      <span>Drawing Time:</span>
+                      <strong>{serverState?.settings?.timeLimitSeconds || 60} seconds</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="15" 
+                      max="120" 
+                      step="5"
+                      value={serverState?.settings?.timeLimitSeconds || 60} 
+                      onChange={(e) => handleUpdateSettings(e.target.value, serverState?.settings?.inkLimit || 1000)}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                      <span>Ink Granted per Turn:</span>
+                      <strong>{serverState?.settings?.inkLimit || 1000} pixels</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="400" 
+                      max="3000" 
+                      step="100"
+                      value={serverState?.settings?.inkLimit || 1000} 
+                      onChange={(e) => handleUpdateSettings(serverState?.settings?.timeLimitSeconds || 60, e.target.value)}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                  </div>
+
+                  <button className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%' }} onClick={handleStartGame}>
+                    🚀 Start Game
+                  </button>
+                </div>
+              ) : (
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1rem 2rem', borderRadius: '8px', display: 'flex', gap: '2rem' }}>
+                  <span>⏳ Turn Time: <strong>{serverState?.settings?.timeLimitSeconds || 60}s</strong></span>
+                  <span>🎨 Ink Available: <strong>{serverState?.settings?.inkLimit || 1000}px</strong></span>
+                </div>
+              )}
             </div>
           ) : gameState === 'playing' ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -237,7 +382,7 @@ const Room = () => {
                 isMyTurn={serverState?.activePlayerId === user.googleId} 
                 onPixelDraw={handlePixelDraw} 
                 onEndTurn={handleEndTurn}
-                pixelsPerTurn={1000}
+                pixelsPerTurn={serverState?.settings?.inkLimit || 1000}
               />
               
               <button 

@@ -59,6 +59,11 @@ const Dashboard = () => {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('pixel_user');
+    navigate('/login');
+  };
+
   if (!userStats) {
     return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center' }}><h2>Loading Stats...</h2></div>;
   }
@@ -67,7 +72,20 @@ const Dashboard = () => {
     <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h1 style={{ color: 'var(--accent-primary)' }}>Career Dashboard</h1>
-        <button className="btn btn-secondary" onClick={() => navigate('/lobby')}>Back to Lobby</button>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button className="btn btn-secondary" onClick={() => navigate('/lobby')}>Back to Lobby</button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={handleLogout}
+            style={{ 
+              color: '#f87171', 
+              borderColor: 'rgba(239, 68, 68, 0.4)', 
+              background: 'rgba(239, 68, 68, 0.1)' 
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '2rem' }}>

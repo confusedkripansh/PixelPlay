@@ -22,6 +22,11 @@ const Lobby = () => {
     navigate(`/room/${newRoomId}`, { state: { password: createPassword } });
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('pixel_user');
+    navigate('/login');
+  };
+
   return (
     <div className="app-container" style={{ alignItems: 'center', paddingTop: '10vh' }}>
       <header className="app-header" style={{ width: '100%', maxWidth: '800px', marginBottom: '3rem' }}>
@@ -38,6 +43,17 @@ const Lobby = () => {
           </div>
           <button className="btn btn-secondary" onClick={() => navigate('/dashboard')}>
             Dashboard
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={handleLogout}
+            style={{ 
+              color: '#f87171', 
+              borderColor: 'rgba(239, 68, 68, 0.4)', 
+              background: 'rgba(239, 68, 68, 0.1)' 
+            }}
+          >
+            Logout
           </button>
         </div>
       </header>

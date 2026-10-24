@@ -80,6 +80,14 @@ func main() {
 		// Public routes (anyone can hit this to get a token)
 		api.POST("/auth/google", authHandler.GoogleLogin)
 		
+		// Global Public Room Feed: lists active public games without passwords
+		api.GET("/rooms/public", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"status": "success",
+				"rooms":  hub.GetPublicRooms(),
+			})
+		})
+		
 		// Protected routes (you MUST have a valid JWT token in your headers to access these)
 		protected := api.Group("/user")
 		protected.Use(middlewares.JWTAuthMiddleware())

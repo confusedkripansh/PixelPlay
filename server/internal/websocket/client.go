@@ -185,6 +185,27 @@ func (c *Client) ReadPump() {
 			c.Room.mu.Lock()
 			// Only the Admin can start the game from the lobby.
 			if c.Room.State.Status == "lobby" && c.Room.State.AdminID == c.UserID {
+				// SEMANTIC RULE: Cannot start game without at least one Judge!
+				hasJudge := false
+				for client := range c.Room.Clients {
+					if client.Role == "judge" {
+						hasJudge = true
+						break
+					}
+				}
+
+				if !hasJudge {
+					c.Room.mu.Unlock()
+					errMsg, _ := json.Marshal(map[string]interface{}{
+						"type": "error",
+						"payload": map[string]string{
+							"message": "Cannot start game without a Judge! At least one player must select the Judge role.",
+						},
+					})
+					c.Send <- errMsg
+					continue
+				}
+
 				c.Room.State.Status = "playing"
 				c.Room.State.CurrentRound = 1
 				c.Room.State.ActiveTeam = "teamA"

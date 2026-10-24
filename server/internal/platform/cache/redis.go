@@ -161,5 +161,42 @@ func (r *RedisClient) ClearRoom(ctx context.Context, roomID string) error {
 
 	stateKey := fmt.Sprintf("room:%s:state", roomID)
 	strokesKey := fmt.Sprintf("room:%s:strokes", roomID)
+	_ = r.RemovePublicRoom(ctx, roomID)
 	return r.Client.Del(ctx, stateKey, strokesKey).Err()
+}
+
+// SetPublicRoom stores/updates a public room's live discovery summary in Redis.
+func (r *RedisClient) SetPublicRoom(ctx context.Context, roomID string, summary interface{}) error {
+	if !r.IsAvailable() {
+		return nil
+	}
+	data, err := json.Marshal(summary)
+	if err != nil {
+		return err
+	}
+	return r.Client.HSet(ctx, "rooms:public", roomID, data).Err()
+}
+
+// RemovePublicRoom removes a room from the public live discovery list.
+func (r *RedisClient) RemovePublicRoom(ctx context.Context, roomID string) error {
+	if !r.IsAvailable() {
+		return nil
+	}
+	return r.Client.HDel(ctx, "rooms:public", roomID).Err()
+}
+
+// GetAllPublicRooms fetches all public rooms currently registered across all server instances.
+func (r *RedisClient) GetAllPublicRooms(ctx context.Context) (map[string][]byte, error) {
+	if !r.IsAvailable() {
+		return nil, fmt.Errorf("redis not available")
+	}
+	items, err := r.Client.HGetAll(ctx, "rooms:public").Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]byte, len(items))
+	for k, v := range items {
+		result[k] = []byte(v)
+	}
+	return result, nil
 }

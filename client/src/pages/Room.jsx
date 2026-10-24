@@ -218,6 +218,7 @@ const Room = () => {
   };
 
   const isAdmin = serverState?.AdminID === user.googleId;
+  const hasJudge = (serverState?.judges || []).length > 0;
 
   return (
     <div className="app-container" style={{ padding: '2rem' }}>
@@ -260,7 +261,13 @@ const Room = () => {
                 <option value="judge">Judge</option>
               </select>
               {isAdmin && (
-                <button className="btn btn-primary" onClick={handleStartGame}>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleStartGame}
+                  disabled={!hasJudge}
+                  style={{ opacity: hasJudge ? 1 : 0.6 }}
+                  title={!hasJudge ? "At least 1 judge is required to start" : "Start Game"}
+                >
                   Start Game
                 </button>
               )}
@@ -379,9 +386,24 @@ const Room = () => {
                     />
                   </div>
 
-                  <button className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%' }} onClick={handleStartGame}>
-                    🚀 Start Game
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ 
+                      marginTop: '0.5rem', 
+                      width: '100%', 
+                      opacity: hasJudge ? 1 : 0.6,
+                      cursor: hasJudge ? 'pointer' : 'not-allowed'
+                    }} 
+                    onClick={handleStartGame}
+                    disabled={!hasJudge}
+                  >
+                    {hasJudge ? '🚀 Start Game' : '⚠️ Judge Required to Start'}
                   </button>
+                  {!hasJudge && (
+                    <div style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.4)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontSize: '0.8rem', color: '#fcd34d', textAlign: 'center' }}>
+                      At least one player must switch to the <strong>Judge</strong> role before the match can begin.
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1rem 2rem', borderRadius: '8px', display: 'flex', gap: '2rem' }}>

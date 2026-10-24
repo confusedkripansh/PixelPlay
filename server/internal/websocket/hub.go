@@ -22,6 +22,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// PublicRoomInfo represents live discovery information for a public room (no password required).
+type PublicRoomInfo struct {
+	RoomID      string `json:"roomId"`
+	PlayerCount int    `json:"playerCount"`
+	Status      string `json:"status"`
+	TimeLimit   int    `json:"timeLimit"`
+	InkLimit    int    `json:"inkLimit"`
+}
+
 // Room represents a single game lobby.
 // In a horizontally scaled cluster, multiple server instances might manage clients connected to the same room.
 // Redis Pub/Sub acts as the central event bus connecting them.
@@ -149,6 +158,20 @@ func (r *Room) BroadcastState() {
 			Scores:   r.Scores,
 		}
 		_ = r.RedisClient.SetRoomState(context.Background(), r.ID, cached, 2*time.Hour)
+
+		// If this is a public room (no password), update its entry in the global feed
+		if r.Password == "" {
+			info := PublicRoomInfo{
+				RoomID:      r.ID,
+				PlayerCount: len(r.Clients) + len(r.Disconnected),
+				Status:      state.Status,
+				TimeLimit:   r.Settings.TimeLimitSeconds,
+				InkLimit:    r.Settings.InkLimit,
+			}
+			_ = r.RedisClient.SetPublicRoom(context.Background(), r.ID, info)
+		} else {
+			_ = r.RedisClient.RemovePublicRoom(context.Background(), r.ID)
+		}
 	}
 
 	// Dispatch to the Broadcast pipe
@@ -354,7 +377,47 @@ func (h *Hub) RemoveRoom(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.Rooms, id)
+	if h.RedisClient != nil && h.RedisClient.IsAvailable() {
+		_ = h.RedisClient.RemovePublicRoom(context.Background(), id)
+	}
 	log.Printf("Room %s removed from Hub memory", id)
+}
+
+// GetPublicRooms fetches all open rooms without a password.
+// In a horizontally scaled deployment, it pulls from Redis to aggregate across all server instances.
+func (h *Hub) GetPublicRooms() []PublicRoomInfo {
+	if h.RedisClient != nil && h.RedisClient.IsAvailable() {
+		rawMap, err := h.RedisClient.GetAllPublicRooms(context.Background())
+		if err == nil {
+			var list []PublicRoomInfo
+			for _, raw := range rawMap {
+				var info PublicRoomInfo
+				if json.Unmarshal(raw, &info) == nil {
+					list = append(list, info)
+				}
+			}
+			return list
+		}
+	}
+
+	// In-memory fallback
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var list []PublicRoomInfo
+	for _, room := range h.Rooms {
+		room.mu.Lock()
+		if room.Password == "" {
+			list = append(list, PublicRoomInfo{
+				RoomID:      room.ID,
+				PlayerCount: len(room.Clients) + len(room.Disconnected),
+				Status:      room.State.Status,
+				TimeLimit:   room.Settings.TimeLimitSeconds,
+				InkLimit:    room.Settings.InkLimit,
+			})
+		}
+		room.mu.Unlock()
+	}
+	return list
 }
 
 // GetOrCreateRoom returns the in-memory Room or loads it from Redis if initialized elsewhere.

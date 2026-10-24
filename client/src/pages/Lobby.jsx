@@ -1,12 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config';
 
 const Lobby = () => {
   const [roomId, setRoomId] = useState('');
   const [password, setPassword] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [publicRooms, setPublicRooms] = useState([]);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(false);
   const navigate = useNavigate();
 
   const user = JSON.parse(localStorage.getItem('pixel_user')) || { name: 'Player One', avatarUrl: 'https://robohash.org/test' };
+
+  const fetchPublicRooms = async () => {
+    setIsLoadingFeed(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/rooms/public`);
+      const data = await res.json();
+      if (data.status === 'success') {
+        setPublicRooms(data.rooms || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch public rooms feed:", err);
+    } finally {
+      setIsLoadingFeed(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPublicRooms();
+    const interval = setInterval(fetchPublicRooms, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleJoin = (e) => {
     e.preventDefault();
@@ -14,8 +39,6 @@ const Lobby = () => {
       navigate(`/room/${roomId}`, { state: { password: password } });
     }
   };
-
-  const [createPassword, setCreatePassword] = useState('');
 
   const handleCreate = () => {
     const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -102,13 +125,109 @@ const Lobby = () => {
               value={createPassword} 
               onChange={(e) => setCreatePassword(e.target.value)}
               style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
-              placeholder="••••••••"
+              placeholder="Leave empty for public match"
             />
+            {createPassword.trim() === '' ? (
+              <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.85rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '6px', color: '#6ee7b7', fontSize: '0.8rem', lineHeight: '1.3' }}>
+                🌍 <strong>Public Room:</strong> No password set. Anyone on the <strong>Global Feed</strong> below will be able to discover and join your match!
+              </div>
+            ) : (
+              <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.85rem', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.4)', borderRadius: '6px', color: '#93c5fd', fontSize: '0.8rem', lineHeight: '1.3' }}>
+                🔒 <strong>Private Room:</strong> Only players with this specific password can join your room.
+              </div>
+            )}
           </div>
           <button onClick={handleCreate} className="btn btn-secondary" style={{ width: '100%' }}>
             Host New Game
           </button>
         </div>
+      </div>
+
+      {/* Global Public Room Feed */}
+      <div className="glass-panel" style={{ width: '100%', maxWidth: '800px', marginTop: '2.5rem', padding: '1.75rem', marginBottom: '4rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <span style={{ fontSize: '1.25rem' }}>🌍</span>
+            <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Global Room Feed</h2>
+            <span style={{ 
+              background: 'rgba(16, 185, 129, 0.2)', 
+              color: '#34d399', 
+              fontSize: '0.75rem', 
+              fontWeight: 'bold', 
+              padding: '0.2rem 0.6rem', 
+              borderRadius: '12px',
+              border: '1px solid rgba(16, 185, 129, 0.3)'
+            }}>
+              ● LIVE
+            </span>
+          </div>
+
+          <button 
+            className="btn btn-secondary" 
+            onClick={fetchPublicRooms}
+            disabled={isLoadingFeed}
+            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <span>{isLoadingFeed ? 'Refreshing...' : '🔄 Refresh Feed'}</span>
+          </button>
+        </div>
+
+        {publicRooms.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2.5rem 1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed var(--glass-border)' }}>
+            <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.95rem' }}>
+              No public rooms active right now.
+            </p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+              Create a room above without a password to be featured live on this global feed!
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '1rem' }}>
+            {publicRooms.map((r) => (
+              <div 
+                key={r.roomId}
+                className="glass-panel"
+                style={{ 
+                  padding: '1rem', 
+                  borderRadius: '8px', 
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '0.75rem',
+                  border: '1px solid rgba(255, 255, 255, 0.08)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--accent-primary)' }}>
+                    Room #{r.roomId}
+                  </span>
+                  <span style={{ 
+                    fontSize: '0.75rem', 
+                    padding: '0.2rem 0.5rem', 
+                    borderRadius: '4px',
+                    background: r.status === 'lobby' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                    color: r.status === 'lobby' ? '#93c5fd' : '#fcd34d'
+                  }}>
+                    {r.status.toUpperCase()}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <div>👤 Players: <strong style={{ color: 'white' }}>{r.playerCount}</strong></div>
+                  <div>⏳ Rules: {r.timeLimit || 60}s | {r.inkLimit || 1000}px</div>
+                </div>
+
+                <button 
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/room/${r.roomId}`)}
+                  style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', marginTop: 'auto' }}
+                >
+                  Quick Join ⚡
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -22,6 +22,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// serverInstanceID uniquely identifies this backend process to avoid Pub/Sub self-echo.
+var serverInstanceID = fmt.Sprintf("srv-%d", time.Now().UnixNano())
+
+// RedisEnvelope wraps messages published across Redis Pub/Sub so instances can ignore their own broadcasts.
+type RedisEnvelope struct {
+	InstanceID string          `json:"instanceId"`
+	Payload    json.RawMessage `json:"payload"`
+}
+
 // PublicRoomInfo represents live discovery information for a public room (no password required).
 type PublicRoomInfo struct {
 	RoomID      string `json:"roomId"`
@@ -53,6 +62,8 @@ type Room struct {
 	UserService    services.UserService
 	RedisClient    *cache.RedisClient // Optional distributed cache/bus connection for multi-server setups.
 	Hub            *Hub
+	TeamATurnCount int
+	TeamBTurnCount int
 
 	// mu is a Mutex (Mutual Exclusion lock). Because multiple Goroutines (players) can try to change the room state
 	// at the exact same millisecond, we call "mu.Lock()" before making a change, and "mu.Unlock()" after.
@@ -101,6 +112,8 @@ func (r *Room) GetFullState() models.GameState {
 	state.Judges = []models.PlayerInfo{}
 	state.Scores = r.Scores
 	state.Settings = r.Settings
+	state.MaxRounds = r.Settings.MaxRounds
+	state.AdminID = r.State.AdminID
 
 	// 1. Add active local clients
 	for client := range r.Clients {
@@ -189,7 +202,22 @@ func (r *Room) Run() {
 			defer pubsub.Close()
 			ch := pubsub.Channel()
 			for msg := range ch {
-				r.LocalBroadcast <- []byte(msg.Payload)
+				var env RedisEnvelope
+				if err := json.Unmarshal([]byte(msg.Payload), &env); err == nil && env.InstanceID != "" {
+					if env.InstanceID == serverInstanceID {
+						// Ignore self-echo: already delivered locally with 0ms delay
+						continue
+					}
+					select {
+					case r.LocalBroadcast <- env.Payload:
+					default:
+					}
+				} else {
+					select {
+					case r.LocalBroadcast <- []byte(msg.Payload):
+					default:
+					}
+				}
 			}
 		}()
 	}
@@ -276,12 +304,26 @@ func (r *Room) Run() {
 
 		// Outbound broadcast event (e.g. stroke drawn, game started, state updated)
 		case message := <-r.Broadcast:
+			// 1. Immediately forward to all local clients with 0ms network latency!
+			select {
+			case r.LocalBroadcast <- message:
+			default:
+			}
+
+			// 2. Publish to Redis Pub/Sub wrapped in an envelope so OTHER server instances receive it
 			if r.RedisClient != nil && r.RedisClient.IsAvailable() {
 				channel := fmt.Sprintf("room:%s:events", r.ID)
-				_ = r.RedisClient.Publish(context.Background(), channel, message)
-			} else {
-				// Standalone fallback: forward directly to local clients
-				r.LocalBroadcast <- message
+				env := RedisEnvelope{
+					InstanceID: serverInstanceID,
+					Payload:    message,
+				}
+				if envBytes, err := json.Marshal(env); err == nil {
+					go func(data []byte) {
+						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer cancel()
+						_ = r.RedisClient.Publish(ctx, channel, data)
+					}(envBytes)
+				}
 			}
 
 		// Inbound broadcast event: delivers bytes to local connected clients
@@ -488,22 +530,59 @@ func (r *Room) UpdateStats() {
 		allPlayers[client.UserID] = client.Role
 	}
 
+	playerResults := make(map[string]map[string]interface{})
+
 	for uid, role := range allPlayers {
-		if uid == "" || (len(uid) >= 6 && uid[:6] == "guest-") {
+		if uid == "" {
 			continue
 		}
 
 		status := "tie"
+		xpEarned := 10
+		pointsEarned := 0
 		if role == "judge" {
 			status = "judge"
+			xpEarned = 25
+			pointsEarned = 0
 		} else if role == winningTeam {
 			status = "win"
+			xpEarned = 50
+			pointsEarned = r.Scores[role]
 		} else if winningTeam != "tie" {
 			status = "loss"
+			xpEarned = 10
+			pointsEarned = r.Scores[role]
+		} else {
+			xpEarned = 20
+			pointsEarned = r.Scores[role]
 		}
 
-		// Asynchronously push updates to the Worker Pool, protecting MongoDB from traffic spikes!
-		r.UserService.QueueGameStatsUpdate(uid, status, r.Scores[role])
+		playerResults[uid] = map[string]interface{}{
+			"status":       status,
+			"role":         role,
+			"xpEarned":     xpEarned,
+			"pointsEarned": pointsEarned,
+		}
+
+		// Asynchronously push updates to the Worker Pool for registered users
+		if len(uid) < 6 || uid[:6] != "guest-" {
+			r.UserService.QueueGameStatsUpdate(uid, status, pointsEarned)
+			log.Printf("Queued game stats update for user %s: status=%s, pts=%d, xp=%d", uid, status, pointsEarned, xpEarned)
+		}
+	}
+
+	// Broadcast match summary so frontends (including guests) can update stats immediately
+	summaryMsg, _ := json.Marshal(map[string]interface{}{
+		"type": "match_summary",
+		"payload": map[string]interface{}{
+			"winningTeam": winningTeam,
+			"scores":      r.Scores,
+			"results":     playerResults,
+		},
+	})
+	select {
+	case r.Broadcast <- summaryMsg:
+	default:
 	}
 }
 

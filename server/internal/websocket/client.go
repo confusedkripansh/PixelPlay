@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"math/rand"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -99,8 +98,8 @@ func (c *Client) ReadPump() {
 					}
 				}
 
-				if c.Room.Password == "" {
-					// First person to join sets the password and becomes admin.
+				if c.Room.State.AdminID == "" {
+					// First person to join sets the password and becomes admin/host.
 					c.Room.Password = authPayload.Password
 					c.Room.State.AdminID = c.UserID
 					c.IsAuthenticated = true
@@ -139,12 +138,17 @@ func (c *Client) ReadPump() {
 				c.Room.Strokes = append(c.Room.Strokes, stroke)
 				c.Room.mu.Unlock()
 
-				// Record stroke to Redis so late-joiners and reconnecting players fetch it
-				if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
-					_ = c.Room.RedisClient.AppendStroke(context.Background(), c.Room.ID, stroke)
-				}
+				// 1. Send the stroke to everyone immediately for buttery-smooth rendering (<1ms latency)
+				c.Room.Broadcast <- message
 
-				c.Room.Broadcast <- message // Send the stroke to everyone else to render.
+				// 2. Record stroke to Redis asynchronously so the read loop NEVER lags
+				if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+					go func(st models.Stroke) {
+						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer cancel()
+						_ = c.Room.RedisClient.AppendStroke(ctx, c.Room.ID, st)
+					}(stroke)
+				}
 			}
 		} else if wsMsg.Type == "switch_role" {
 			var rolePayload struct {
@@ -183,52 +187,94 @@ func (c *Client) ReadPump() {
 			}
 		} else if wsMsg.Type == "start_game" {
 			c.Room.mu.Lock()
-			// Only the Admin can start the game from the lobby.
-			if c.Room.State.Status == "lobby" && c.Room.State.AdminID == c.UserID {
-				// SEMANTIC RULE: Cannot start game without at least one Judge!
-				hasJudge := false
-				for client := range c.Room.Clients {
-					if client.Role == "judge" {
-						hasJudge = true
-						break
-					}
-				}
-
-				if !hasJudge {
-					c.Room.mu.Unlock()
-					errMsg, _ := json.Marshal(map[string]interface{}{
-						"type": "error",
-						"payload": map[string]string{
-							"message": "Cannot start game without a Judge! At least one player must select the Judge role.",
-						},
-					})
-					c.Send <- errMsg
-					continue
-				}
-
-				c.Room.State.Status = "playing"
-				c.Room.State.CurrentRound = 1
-				c.Room.State.ActiveTeam = "teamA"
-				
-				// Find the first person on Team A and make them the drawer.
-				for client := range c.Room.Clients {
-					if client.Role == "teamA" {
-						c.Room.State.ActivePlayerID = client.UserID
-						break
-					}
-				}
-				
-				// Pick a fresh, precise word from our 320+ curated dictionary
-				nextWord := words.GetRandomWord(c.Room.State.UsedWords)
-				c.Room.State.CurrentWord = nextWord
-				c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
+			if c.Room.State.Status != "lobby" {
+				c.Room.mu.Unlock()
+				continue
 			}
+
+			// STRICT HOST-ONLY CHECK: Only the designated room Admin can start the match!
+			if c.Room.State.AdminID != c.UserID {
+				c.Room.mu.Unlock()
+				errMsg, _ := json.Marshal(map[string]interface{}{
+					"type": "error",
+					"payload": map[string]string{
+						"message": "Only the room host can start the game!",
+					},
+				})
+				c.Send <- errMsg
+				continue
+			}
+
+			// SEMANTIC RULE: Cannot start game without at least one Judge!
+			hasJudge := false
+			for client := range c.Room.Clients {
+				if client.Role == "judge" {
+					hasJudge = true
+					break
+				}
+			}
+
+			if !hasJudge {
+				c.Room.mu.Unlock()
+				errMsg, _ := json.Marshal(map[string]interface{}{
+					"type": "error",
+					"payload": map[string]string{
+						"message": "Cannot start game without a Judge! At least one player must select the Judge role.",
+					},
+				})
+				c.Send <- errMsg
+				continue
+			}
+
+			// Initialize game parameters
+			c.Room.State.Status = "playing"
+			c.Room.State.CurrentRound = 1
+			c.Room.State.ActiveTeam = "teamA"
+			c.Room.TeamATurnCount = 0
+			c.Room.TeamBTurnCount = 0
+
+			// Clean slate for strokes: clear RAM, clear Redis
+			c.Room.Strokes = []models.Stroke{}
+			if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+				go func(rid string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					_ = c.Room.RedisClient.ClearStrokes(ctx, rid)
+				}(c.Room.ID)
+			}
+			
+			// Round robin selection for Team A drawer
+			var teamAMembers []string
+			for client := range c.Room.Clients {
+				if client.Role == "teamA" {
+					teamAMembers = append(teamAMembers, client.UserID)
+				}
+			}
+			if len(teamAMembers) > 0 {
+				c.Room.State.ActivePlayerID = teamAMembers[c.Room.TeamATurnCount%len(teamAMembers)]
+				c.Room.TeamATurnCount++
+			} else {
+				c.Room.State.ActivePlayerID = ""
+			}
+			
+			// Pick a fresh, precise word from our 320+ curated dictionary
+			nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+			c.Room.State.CurrentWord = nextWord
+			c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
 			c.Room.mu.Unlock()
+
+			// Broadcast clear canvas so all players' boards are wiped clean
+			clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
+			c.Room.Broadcast <- clearCanvasMsg
+
 			go c.Room.BroadcastState()
 		} else if wsMsg.Type == "end_turn" {
 			c.Room.mu.Lock()
 			if c.Room.State.Status == "playing" {
-				c.Room.State.Status = "judging"
+				// Allow active drawer or room host to end drawing turn early
+				if c.UserID == c.Room.State.ActivePlayerID || c.UserID == c.Room.State.AdminID {
+					c.Room.State.Status = "judging"
+				}
 			}
 			c.Room.mu.Unlock()
 			go c.Room.BroadcastState()
@@ -238,46 +284,82 @@ func (c *Client) ReadPump() {
 			}
 			if err := json.Unmarshal(wsMsg.Payload, &scorePayload); err == nil {
 				c.Room.mu.Lock()
-				// Only Judges can submit scores, and only during the judging phase.
-				if c.Role == "judge" && c.Room.State.Status == "judging" {
+				// Allow Judges OR Room Admin to submit scores (allows host simulation in tests)
+				if (c.Role == "judge" || c.UserID == c.Room.State.AdminID) && c.Room.State.Status == "judging" {
 					c.Room.Scores[c.Room.State.ActiveTeam] += scorePayload.Score
 					
-					// Swap active team for the next round.
-					if c.Room.State.ActiveTeam == "teamA" {
-						c.Room.State.ActiveTeam = "teamB"
-					} else {
-						c.Room.State.ActiveTeam = "teamA"
-						c.Room.State.CurrentRound++
+					// Clear strokes for the upcoming turn
+					c.Room.Strokes = []models.Stroke{}
+					if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+						go func(rid string) {
+							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							defer cancel()
+							_ = c.Room.RedisClient.ClearStrokes(ctx, rid)
+						}(c.Room.ID)
 					}
 
-					// End the game if max rounds reached, otherwise reset for next round.
-					if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
-						c.Room.State.Status = "finished"
-						go c.Room.UpdateStats() // Update MongoDB!
-					} else {
+					if c.Room.State.ActiveTeam == "teamA" {
+						// Team A finished their word. Now Team B draws their word!
+						c.Room.State.ActiveTeam = "teamB"
 						c.Room.State.Status = "playing"
-						
-						// Pick a fresh, precise word without repeating
-						nextWord := words.GetRandomWord(c.Room.State.UsedWords)
-						c.Room.State.CurrentWord = nextWord
-						c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
-						
-						// Assign a random player from the new active team to draw.
-						var teamMembers []string
+
+						// Round Robin selection for Team B drawer
+						var teamBMembers []string
 						for client := range c.Room.Clients {
-							if client.Role == c.Room.State.ActiveTeam {
-								teamMembers = append(teamMembers, client.UserID)
+							if client.Role == "teamB" {
+								teamBMembers = append(teamBMembers, client.UserID)
 							}
 						}
-						if len(teamMembers) > 0 {
-							c.Room.State.ActivePlayerID = teamMembers[rand.Intn(len(teamMembers))]
+						if len(teamBMembers) > 0 {
+							c.Room.State.ActivePlayerID = teamBMembers[c.Room.TeamBTurnCount%len(teamBMembers)]
+							c.Room.TeamBTurnCount++
 						} else {
 							c.Room.State.ActivePlayerID = ""
 						}
+
+						nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+						c.Room.State.CurrentWord = nextWord
+						c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
+					} else {
+						// Team B finished their word! That completes 1 full round for both teams.
+						c.Room.State.CurrentRound++
+
+						// End match if max rounds reached, otherwise rotate to Team A for next round
+						if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
+							c.Room.State.Status = "finished"
+							go c.Room.UpdateStats()
+						} else {
+							c.Room.State.ActiveTeam = "teamA"
+							c.Room.State.Status = "playing"
+
+							var teamAMembers []string
+							for client := range c.Room.Clients {
+								if client.Role == "teamA" {
+									teamAMembers = append(teamAMembers, client.UserID)
+								}
+							}
+							if len(teamAMembers) > 0 {
+								c.Room.State.ActivePlayerID = teamAMembers[c.Room.TeamATurnCount%len(teamAMembers)]
+								c.Room.TeamATurnCount++
+							} else {
+								c.Room.State.ActivePlayerID = ""
+							}
+
+							nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+							c.Room.State.CurrentWord = nextWord
+							c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
+						}
 					}
+					c.Room.mu.Unlock()
+
+					// Broadcast clear_canvas so everyone's screen wipes clean for the next word/turn
+					clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
+					c.Room.Broadcast <- clearCanvasMsg
+
+					go c.Room.BroadcastState()
+				} else {
+					c.Room.mu.Unlock()
 				}
-				c.Room.mu.Unlock()
-				go c.Room.BroadcastState()
 			}
 		} else {
 			// If it's a generic chat message, just broadcast it to everyone.

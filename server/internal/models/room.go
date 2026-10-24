@@ -23,12 +23,13 @@ type Stroke struct {
 }
 
 type GameState struct {
-	Status         string       `json:"status"` // "lobby", "drawing", "judging", "finished"
-	CurrentRound   int          `json:"currentRound"`
-	ActiveTeam     string       `json:"activeTeam"` // "A" or "B"
-	ActivePlayerID string       `json:"activePlayerId"`
-	CurrentWord    string       `json:"currentWord,omitempty"`
-	AdminID        string       `json:"AdminID,omitempty"`
+	Status         string         `json:"status"` // "lobby", "playing", "judging", "finished"
+	CurrentRound   int            `json:"currentRound"`
+	MaxRounds      int            `json:"maxRounds"`
+	ActiveTeam     string         `json:"activeTeam"` // "teamA" or "teamB"
+	ActivePlayerID string         `json:"activePlayerId"`
+	CurrentWord    string         `json:"currentWord,omitempty"`
+	AdminID        string         `json:"adminId"`
 	TeamA          []PlayerInfo   `json:"teamA"`
 	TeamB          []PlayerInfo   `json:"teamB"`
 	Judges         []PlayerInfo   `json:"judges"`

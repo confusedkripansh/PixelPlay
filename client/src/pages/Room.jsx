@@ -9,20 +9,27 @@ const Room = () => {
   const navigate = useNavigate();
   const password = location.state?.password || '';
   
-  const [gameState, setGameState] = useState('lobby'); // lobby, playing, judging
+  const [gameState, setGameState] = useState('lobby'); // lobby, playing, judging, finished
   const [role, setRole] = useState('teamA'); // teamA, teamB, judge
-  const [activePlayer, setActivePlayer] = useState('me'); // 'me' or 'other'
   const [serverState, setServerState] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(15);
+  const [timeLeft, setTimeLeft] = useState(60);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  
+  // Room settings state
   const [sliderTime, setSliderTime] = useState(60);
   const [sliderInk, setSliderInk] = useState(1000);
+  const [sliderRounds, setSliderRounds] = useState(3);
   
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
 
-  const user = JSON.parse(localStorage.getItem('pixel_user')) || { googleId: 'guest-' + Math.random(), name: 'Guest', avatarUrl: 'https://robohash.org/guest' };
+  const user = JSON.parse(localStorage.getItem('pixel_user')) || { 
+    googleId: 'guest-' + Math.floor(100000 + Math.random() * 900000), 
+    name: 'Guest Player', 
+    avatarUrl: 'https://robohash.org/guest' 
+  };
 
+  // Sync settings from server if available
   useEffect(() => {
     if (serverState?.settings) {
       if (serverState.settings.timeLimitSeconds) {
@@ -31,9 +38,20 @@ const Room = () => {
       if (serverState.settings.inkLimit) {
         setSliderInk(serverState.settings.inkLimit);
       }
+      if (serverState.settings.maxRounds) {
+        setSliderRounds(serverState.settings.maxRounds);
+      }
     }
-  }, [serverState?.settings?.timeLimitSeconds, serverState?.settings?.inkLimit]);
+  }, [serverState?.settings?.timeLimitSeconds, serverState?.settings?.inkLimit, serverState?.settings?.maxRounds]);
 
+  // Clean canvas whenever drawer or word transitions
+  useEffect(() => {
+    if (gameState === 'playing' && canvasRef.current) {
+      canvasRef.current.clearCanvas();
+    }
+  }, [serverState?.activePlayerId, serverState?.currentWord, gameState]);
+
+  // Establish WebSocket connection
   useEffect(() => {
     let isMounted = true;
     let reconnectTimeout = null;
@@ -42,7 +60,7 @@ const Room = () => {
       const wsUrl = new URL(WS_BASE_URL);
       wsUrl.searchParams.append('roomId', roomId);
       wsUrl.searchParams.append('userId', user.googleId);
-      wsUrl.searchParams.append('name', user.name || 'Guest');
+      wsUrl.searchParams.append('name', user.name || 'Guest Player');
       wsUrl.searchParams.append('avatar', user.avatarUrl || 'https://robohash.org/guest');
       
       const ws = new WebSocket(wsUrl.toString());
@@ -62,12 +80,17 @@ const Room = () => {
           const msg = JSON.parse(event.data);
           switch (msg.type) {
             case 'error':
-              alert(msg.payload.message || 'Connection error');
+              alert(msg.payload?.message || 'Connection error');
               navigate('/lobby');
               break;
             case 'room_terminated':
               alert(msg.payload?.reason || 'The room was terminated because the owner left.');
               navigate('/lobby');
+              break;
+            case 'clear_canvas':
+              if (canvasRef.current) {
+                canvasRef.current.clearCanvas();
+              }
               break;
             case 'stroke_sync':
               if (canvasRef.current && Array.isArray(msg.payload)) {
@@ -83,21 +106,35 @@ const Room = () => {
               setServerState(msg.payload);
               setGameState(msg.payload.status);
               break;
+            case 'match_summary':
+              // Immediately update career stats in localStorage for instant dashboard feedback
+              if (msg.payload?.results) {
+                const myResult = msg.payload.results[user.googleId];
+                if (myResult) {
+                  const currentStats = user.stats || { wins: 0, losses: 0, experience: 0, totalPoints: 0 };
+                  const updatedStats = {
+                    wins: (currentStats.wins || 0) + (myResult.status === 'win' ? 1 : 0),
+                    losses: (currentStats.losses || 0) + (myResult.status === 'loss' ? 1 : 0),
+                    experience: (currentStats.experience || 0) + (myResult.xpEarned || 0),
+                    totalPoints: (currentStats.totalPoints || 0) + (myResult.pointsEarned || 0),
+                    pixelsDrawn: currentStats.pixelsDrawn || 0
+                  };
+                  const updatedUser = { ...user, stats: updatedStats };
+                  localStorage.setItem('pixel_user', JSON.stringify(updatedUser));
+                }
+              }
+              break;
           }
         } catch (e) {
           console.error("Invalid WS message:", e);
         }
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = () => {
         if (!isMounted) return;
-        // If not intentional exit and error wasn't an explicit password rejection
         setIsReconnecting(true);
-        console.warn("WebSocket disconnected. Attempting auto-reconnect in 2 seconds...");
         reconnectTimeout = setTimeout(() => {
-          if (isMounted) {
-            connect();
-          }
+          if (isMounted) connect();
         }, 2000);
       };
     };
@@ -111,6 +148,7 @@ const Room = () => {
     };
   }, [roomId, password, user.googleId, user.name, user.avatarUrl]);
 
+  // Turn Countdown Timer
   useEffect(() => {
     let timer;
     if (gameState === 'playing') {
@@ -121,8 +159,8 @@ const Room = () => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
             clearInterval(timer);
-            // Time is up, automatically end turn if it's my turn
-            if (serverState?.activePlayerId === user.googleId) {
+            // Automatically advance when timer expires if drawer or host
+            if (serverState?.activePlayerId === user.googleId || isAdmin) {
               handleEndTurn();
             }
             return 0;
@@ -136,12 +174,13 @@ const Room = () => {
     return () => clearInterval(timer);
   }, [gameState, serverState?.activePlayerId, serverState?.currentRound, serverState?.settings?.timeLimitSeconds, user.googleId]);
 
+  // Auto redirect to dashboard at end of match
   useEffect(() => {
     let redirectTimer;
     if (gameState === 'finished') {
       redirectTimer = setTimeout(() => {
         navigate('/dashboard');
-      }, 5000);
+      }, 6000);
     }
     return () => clearTimeout(redirectTimer);
   }, [gameState, navigate]);
@@ -152,13 +191,14 @@ const Room = () => {
     }
   };
 
-  const handleUpdateSettings = (timeLimit, inkLimit) => {
+  const handleUpdateSettings = (timeLimit, inkLimit, rounds) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'update_settings',
         payload: {
           timeLimitSeconds: Number(timeLimit),
-          inkLimit: Number(inkLimit)
+          inkLimit: Number(inkLimit),
+          maxRounds: Number(rounds)
         }
       }));
     }
@@ -167,18 +207,24 @@ const Room = () => {
   const handleSliderTimeChange = (val) => {
     const num = Number(val);
     setSliderTime(num);
-    handleUpdateSettings(num, sliderInk);
+    handleUpdateSettings(num, sliderInk, sliderRounds);
   };
 
   const handleSliderInkChange = (val) => {
     const num = Number(val);
     setSliderInk(num);
-    handleUpdateSettings(sliderTime, num);
+    handleUpdateSettings(sliderTime, num, sliderRounds);
+  };
+
+  const handleSliderRoundsChange = (val) => {
+    const num = Number(val);
+    setSliderRounds(num);
+    handleUpdateSettings(sliderTime, sliderInk, num);
   };
 
   const handleLeaveRoom = () => {
     if (isAdmin) {
-      if (window.confirm("As room owner, leaving will terminate the room for all players. Are you sure you want to exit?")) {
+      if (window.confirm("As room host, leaving will terminate this match for all players. Are you sure?")) {
         wsRef.current?.close();
         navigate('/lobby');
       }
@@ -217,14 +263,20 @@ const Room = () => {
     }
   };
 
-  const isAdmin = serverState?.AdminID === user.googleId;
+  // Host verification supports both JSON key formats
+  const isAdmin = (serverState?.adminId === user.googleId) || (serverState?.AdminID === user.googleId);
   const hasJudge = (serverState?.judges || []).length > 0;
+  const isDrawer = serverState?.activePlayerId === user.googleId;
+  const canEndTurn = isDrawer || isAdmin;
+  const maxRoundsCount = serverState?.maxRounds || serverState?.settings?.maxRounds || 3;
+  const currentRoundNum = serverState?.currentRound || 1;
 
   return (
-    <div className="app-container" style={{ padding: '2rem' }}>
+    <div className="app-container" style={{ padding: '1.5rem 2rem' }}>
+      {/* Reconnecting Banner */}
       {isReconnecting && (
         <div style={{
-          background: 'rgba(239, 68, 68, 0.9)',
+          background: 'linear-gradient(90deg, #ff2247, #ff5e3a)',
           color: 'white',
           padding: '0.75rem 1.5rem',
           borderRadius: '8px',
@@ -232,43 +284,66 @@ const Room = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '0.5rem',
-          fontWeight: 'bold',
-          animation: 'pulse 1.5s infinite'
+          gap: '0.75rem',
+          fontWeight: 800,
+          boxShadow: '0 0 20px rgba(255, 34, 71, 0.5)'
         }}>
-          <span>⚠️ Connection interrupted. Automatically reconnecting to room...</span>
+          <span className="laser-pulse">⚠️ RECONNECTING TO MATCH BUS...</span>
         </div>
       )}
 
-      <header className="glass-panel" style={{ padding: '1rem 2rem', marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Room: <span style={{ color: 'var(--accent-primary)' }}>{roomId}</span></h2>
-          <span style={{ color: 'var(--text-secondary)' }}>Status: {gameState.toUpperCase()}</span>
+      {/* Esports Header */}
+      <header className="glass-panel" style={{ 
+        padding: '1rem 1.5rem', 
+        marginBottom: '1.5rem', 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        borderLeft: '4px solid #00f0ff'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div>
+            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', fontWeight: 800 }}>MATCH ARENA</div>
+            <h2 style={{ margin: 0, fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span>ROOM:</span>
+              <span style={{ color: '#00f0ff', textShadow: '0 0 10px rgba(0,240,255,0.4)' }}>{roomId}</span>
+            </h2>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span className="badge-live">
+              {gameState === 'lobby' ? 'LOBBY' : gameState === 'playing' ? `ROUND ${currentRoundNum}/${maxRoundsCount}` : gameState.toUpperCase()}
+            </span>
+            {isAdmin && <span className="badge-tag" style={{ background: 'rgba(255, 208, 0, 0.15)', color: '#ffd000', border: '1px solid rgba(255, 208, 0, 0.4)' }}>HOST</span>}
+          </div>
         </div>
         
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {gameState === 'lobby' && (
             <>
-              <span style={{ color: 'var(--text-secondary)' }}>Switch Role:</span>
-              <select 
-                className="btn btn-secondary" 
-                value={role} 
-                onChange={handleRoleChange}
-                style={{ background: 'rgba(0,0,0,0.2)' }}
-              >
-                <option value="teamA">Team A</option>
-                <option value="teamB">Team B</option>
-                <option value="judge">Judge</option>
-              </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94a3b8' }}>ROLE:</span>
+                <select 
+                  className="btn btn-secondary" 
+                  value={role} 
+                  onChange={handleRoleChange}
+                  style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }}
+                >
+                  <option value="teamA">Team Alpha (Blue)</option>
+                  <option value="teamB">Team Beta (Red)</option>
+                  <option value="judge">Judge (Referee)</option>
+                </select>
+              </div>
+
               {isAdmin && (
                 <button 
                   className="btn btn-primary" 
                   onClick={handleStartGame}
                   disabled={!hasJudge}
-                  style={{ opacity: hasJudge ? 1 : 0.6 }}
-                  title={!hasJudge ? "At least 1 judge is required to start" : "Start Game"}
+                  style={{ opacity: hasJudge ? 1 : 0.5, cursor: hasJudge ? 'pointer' : 'not-allowed' }}
+                  title={!hasJudge ? "Match cannot start without at least 1 Judge" : "Launch Arena Match"}
                 >
-                  Start Game
+                  {hasJudge ? '⚔️ Launch Match' : '⚠️ Need 1 Judge'}
                 </button>
               )}
             </>
@@ -278,86 +353,196 @@ const Room = () => {
             className="btn btn-secondary" 
             onClick={handleLeaveRoom}
             style={{ 
-              background: 'rgba(239, 68, 68, 0.15)', 
-              borderColor: 'rgba(239, 68, 68, 0.4)', 
-              color: '#f87171' 
+              background: 'rgba(255, 34, 71, 0.1)', 
+              borderColor: 'rgba(255, 34, 71, 0.3)', 
+              color: '#ff3366' 
             }}
           >
-            {isAdmin ? 'End Room' : 'Leave'}
+            {isAdmin ? 'Terminate Room' : 'Exit Room'}
           </button>
         </div>
       </header>
 
-      <div style={{ display: 'flex', gap: '2rem' }}>
-        {/* Sidebar */}
-        <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Arena Grid */}
+      <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
+        
+        {/* Team Rosters Sidebar */}
+        <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           
-          <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--accent-primary)', marginBottom: '1rem' }}>Team A (Score: {serverState?.scores?.teamA || 0}) {serverState?.activeTeam === 'teamA' && '(Drawing)'}</h3>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {(serverState?.teamA || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
+          {/* Team Alpha Card */}
+          <div className="glass-panel" style={{ 
+            padding: '1.2rem', 
+            borderLeft: serverState?.activeTeam === 'teamA' && gameState === 'playing' ? '4px solid #00f0ff' : '1px solid var(--glass-border)',
+            boxShadow: serverState?.activeTeam === 'teamA' && gameState === 'playing' ? '0 0 20px rgba(0, 240, 255, 0.25)' : 'none'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#00f0ff', boxShadow: '0 0 8px #00f0ff' }}></span>
+                <h3 style={{ margin: 0, fontSize: '1rem', color: '#00f0ff' }}>TEAM ALPHA</h3>
+              </div>
+              <span style={{ fontSize: '1.2rem', fontWeight: 900, color: '#f8fafc' }}>
+                {serverState?.scores?.teamA || 0} <span style={{ fontSize: '0.75rem', color: '#64748b' }}>PTS</span>
+              </span>
+            </div>
+            {serverState?.activeTeam === 'teamA' && gameState === 'playing' && (
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#00f0ff', marginBottom: '0.5rem', letterSpacing: '0.5px' }}>
+                ✏️ CURRENTLY DRAWING
+              </div>
+            )}
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {(serverState?.teamA || []).length === 0 && <li style={{ color: '#64748b', fontSize: '0.85rem' }}>No players joined yet</li>}
               {(serverState?.teamA || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
-                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>
-                    {player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}
-                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--accent-secondary)', marginBottom: '1rem' }}>Team B (Score: {serverState?.scores?.teamB || 0}) {serverState?.activeTeam === 'teamB' && '(Drawing)'}</h3>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {(serverState?.teamB || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
-              {(serverState?.teamB || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
-                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>
-                    {player.name} {player.userId === serverState?.activePlayerId ? '(Active)' : ''}
-                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: '#f59e0b', marginBottom: '1rem' }}>Judges</h3>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {(serverState?.judges || []).length === 0 && <li style={{ color: 'var(--text-secondary)' }}>Waiting...</li>}
-              {(serverState?.judges || []).map((player) => (
-                <li key={player.userId} style={{ padding: '0.5rem', background: player.isDisconnected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.1)', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: player.isDisconnected ? 0.7 : 1 }}>
-                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
-                  <span>
+                <li key={player.userId} style={{ 
+                  padding: '0.45rem 0.65rem', 
+                  background: player.userId === serverState?.activePlayerId ? 'rgba(0, 240, 255, 0.15)' : 'rgba(255,255,255,0.03)', 
+                  border: player.userId === serverState?.activePlayerId ? '1px solid #00f0ff' : '1px solid transparent',
+                  borderRadius: '6px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.6rem' 
+                }}>
+                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.2)' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: player.userId === serverState?.activePlayerId ? '#00f0ff' : '#f8fafc' }}>
                     {player.name}
-                    {player.isDisconnected && <span style={{ color: '#ef4444', fontSize: '0.8rem', marginLeft: '0.3rem' }}>(reconnecting...)</span>}
                   </span>
+                  {player.userId === serverState?.activePlayerId && (
+                    <span className="badge-tag" style={{ marginLeft: 'auto', background: '#00f0ff', color: '#000' }}>DRAWER</span>
+                  )}
                 </li>
               ))}
             </ul>
           </div>
+
+          {/* Team Beta Card */}
+          <div className="glass-panel" style={{ 
+            padding: '1.2rem', 
+            borderLeft: serverState?.activeTeam === 'teamB' && gameState === 'playing' ? '4px solid #ff3366' : '1px solid var(--glass-border)',
+            boxShadow: serverState?.activeTeam === 'teamB' && gameState === 'playing' ? '0 0 20px rgba(255, 51, 102, 0.25)' : 'none'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff3366', boxShadow: '0 0 8px #ff3366' }}></span>
+                <h3 style={{ margin: 0, fontSize: '1rem', color: '#ff3366' }}>TEAM BETA</h3>
+              </div>
+              <span style={{ fontSize: '1.2rem', fontWeight: 900, color: '#f8fafc' }}>
+                {serverState?.scores?.teamB || 0} <span style={{ fontSize: '0.75rem', color: '#64748b' }}>PTS</span>
+              </span>
+            </div>
+            {serverState?.activeTeam === 'teamB' && gameState === 'playing' && (
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#ff3366', marginBottom: '0.5rem', letterSpacing: '0.5px' }}>
+                ✏️ CURRENTLY DRAWING
+              </div>
+            )}
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {(serverState?.teamB || []).length === 0 && <li style={{ color: '#64748b', fontSize: '0.85rem' }}>No players joined yet</li>}
+              {(serverState?.teamB || []).map((player) => (
+                <li key={player.userId} style={{ 
+                  padding: '0.45rem 0.65rem', 
+                  background: player.userId === serverState?.activePlayerId ? 'rgba(255, 51, 102, 0.15)' : 'rgba(255,255,255,0.03)', 
+                  border: player.userId === serverState?.activePlayerId ? '1px solid #ff3366' : '1px solid transparent',
+                  borderRadius: '6px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.6rem' 
+                }}>
+                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.2)' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: player.userId === serverState?.activePlayerId ? '#ff3366' : '#f8fafc' }}>
+                    {player.name}
+                  </span>
+                  {player.userId === serverState?.activePlayerId && (
+                    <span className="badge-tag" style={{ marginLeft: 'auto', background: '#ff3366', color: '#fff' }}>DRAWER</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Judges Booth Card */}
+          <div className="glass-panel" style={{ padding: '1.2rem', borderLeft: '4px solid #ffd000' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffd000', boxShadow: '0 0 8px #ffd000' }}></span>
+                <h3 style={{ margin: 0, fontSize: '1rem', color: '#ffd000' }}>JUDGES BOOTH</h3>
+              </div>
+              <span className="badge-tag" style={{ background: 'rgba(255,208,0,0.15)', color: '#ffd000' }}>
+                {(serverState?.judges || []).length} REFEREE
+              </span>
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {(serverState?.judges || []).length === 0 && (
+                <li style={{ color: '#ffd000', fontSize: '0.8rem', background: 'rgba(255,208,0,0.1)', padding: '0.4rem', borderRadius: '4px' }}>
+                  ⚠️ At least 1 Judge is needed to begin
+                </li>
+              )}
+              {(serverState?.judges || []).map((player) => (
+                <li key={player.userId} style={{ padding: '0.45rem 0.65rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <img src={player.avatar} alt="avatar" style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid #ffd000' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{player.name}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
         </div>
 
-        {/* Main Area */}
-        <div style={{ flex: '3', display: 'flex', flexDirection: 'column' }}>
+        {/* Central Arena Main Canvas Area */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          
           {gameState === 'lobby' ? (
-            <div className="glass-panel" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '2rem' }}>
-              <h2>Waiting for players...</h2>
-              <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '2rem' }}>
-                {isAdmin ? 'You are the Room Owner. Configure match rules below and start when ready.' : 'The room owner will start the game when all players are ready.'}
+            <div className="glass-panel" style={{ width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎮</div>
+              <h2 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>MATCH LOBBY</h2>
+              <p style={{ color: '#94a3b8', maxWidth: '500px', marginBottom: '2rem', fontSize: '0.9rem' }}>
+                {isAdmin 
+                  ? 'Configure match rules, round robin rotation, and words below. When ready, launch the arena.' 
+                  : 'Waiting for room host to launch the match. Pick your team or step in as Judge!'}
               </p>
 
               {isAdmin ? (
-                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.5rem', borderRadius: '12px', width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <h3 style={{ margin: 0, color: 'var(--accent-primary)', fontSize: '1.1rem' }}>⚙️ Room Rules (Owner Controls)</h3>
-                  
+                <div style={{ 
+                  background: 'rgba(7, 9, 14, 0.65)', 
+                  border: '1px solid rgba(0, 240, 255, 0.25)', 
+                  padding: '1.5rem', 
+                  borderRadius: '12px', 
+                  width: '100%', 
+                  maxWidth: '460px', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '1.25rem',
+                  textAlign: 'left'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, color: '#00f0ff', fontSize: '1rem', letterSpacing: '0.5px' }}>
+                      ⚙️ HOST MATCH CONTROLS
+                    </h3>
+                    <span className="badge-tag" style={{ background: '#00f0ff', color: '#000' }}>ADMIN ONLY</span>
+                  </div>
+
+                  {/* Total Rounds Slider */}
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                      <span>Drawing Time:</span>
-                      <strong>{sliderTime} seconds</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.85rem' }}>
+                      <span style={{ color: '#94a3b8' }}>Total Match Rounds (Words):</span>
+                      <strong style={{ color: '#00f0ff' }}>{sliderRounds} Rounds</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="10" 
+                      step="1"
+                      value={sliderRounds} 
+                      onChange={(e) => handleSliderRoundsChange(e.target.value)}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>
+                      Each round consists of 1 word for Team Alpha and 1 word for Team Beta in round robin.
+                    </div>
+                  </div>
+
+                  {/* Turn Time Limit */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.85rem' }}>
+                      <span style={{ color: '#94a3b8' }}>Turn Time Limit:</span>
+                      <strong style={{ color: '#00f0ff' }}>{sliderTime} Seconds</strong>
                     </div>
                     <input 
                       type="range" 
@@ -370,10 +555,11 @@ const Room = () => {
                     />
                   </div>
 
+                  {/* Ink Limit */}
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                      <span>Ink Granted per Turn:</span>
-                      <strong>{sliderInk} pixels</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.85rem' }}>
+                      <span style={{ color: '#94a3b8' }}>Ink Allowed per Turn:</span>
+                      <strong style={{ color: '#00f0ff' }}>{sliderInk} Pixels</strong>
                     </div>
                     <input 
                       type="range" 
@@ -386,115 +572,199 @@ const Room = () => {
                     />
                   </div>
 
+                  {/* Launch Button */}
                   <button 
                     className="btn btn-primary" 
                     style={{ 
                       marginTop: '0.5rem', 
                       width: '100%', 
-                      opacity: hasJudge ? 1 : 0.6,
+                      padding: '0.85rem',
+                      opacity: hasJudge ? 1 : 0.5,
                       cursor: hasJudge ? 'pointer' : 'not-allowed'
                     }} 
                     onClick={handleStartGame}
                     disabled={!hasJudge}
                   >
-                    {hasJudge ? '🚀 Start Game' : '⚠️ Judge Required to Start'}
+                    {hasJudge ? '🚀 Launch Match Now' : '⚠️ Match Requires 1 Judge'}
                   </button>
                   {!hasJudge && (
-                    <div style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.4)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontSize: '0.8rem', color: '#fcd34d', textAlign: 'center' }}>
-                      At least one player must switch to the <strong>Judge</strong> role before the match can begin.
+                    <div style={{ background: 'rgba(255, 208, 0, 0.1)', border: '1px solid rgba(255, 208, 0, 0.3)', borderRadius: '6px', padding: '0.5rem', fontSize: '0.75rem', color: '#ffd000', textAlign: 'center' }}>
+                      Ask a player to select the <strong>Judge</strong> role from the top menu.
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1rem 2rem', borderRadius: '8px', display: 'flex', gap: '2rem' }}>
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '1.2rem 2rem', borderRadius: '8px', display: 'flex', gap: '2rem' }}>
+                  <span>🎯 Rounds: <strong>{maxRoundsCount}</strong></span>
                   <span>⏳ Turn Time: <strong>{serverState?.settings?.timeLimitSeconds || 60}s</strong></span>
-                  <span>🎨 Ink Available: <strong>{serverState?.settings?.inkLimit || 1000}px</strong></span>
+                  <span>🎨 Ink Pool: <strong>{serverState?.settings?.inkLimit || 1000}px</strong></span>
                 </div>
               )}
             </div>
           ) : gameState === 'playing' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', marginBottom: '1rem' }}>
-                <h2 style={{ margin: 0 }}>
-                  {serverState?.activePlayerId === user.googleId 
-                    ? `Draw: ${serverState?.currentWord || 'Unknown'}` 
-                    : `${serverState?.activeTeam === 'teamA' ? 'Team A' : 'Team B'} is drawing...`}
-                </h2>
-                <div style={{ padding: '0.5rem 1rem', background: timeLeft <= 5 ? 'var(--accent-danger)' : 'rgba(255,255,255,0.1)', borderRadius: '20px', fontWeight: 'bold' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+              
+              {/* Active Match Banner */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                width: '100%', 
+                maxWidth: '512px', 
+                marginBottom: '1rem',
+                background: 'rgba(13, 17, 24, 0.8)',
+                padding: '0.75rem 1.25rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.1)'
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 800 }}>ROUND {currentRoundNum} OF {maxRoundsCount}</div>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: isDrawer ? '#00ff88' : '#00f0ff' }}>
+                    {isDrawer ? `SECRET WORD: ${serverState?.currentWord}` : `${serverState?.activeTeam === 'teamA' ? 'Team Alpha' : 'Team Beta'} is Drawing...`}
+                  </h3>
+                </div>
+
+                <div style={{ 
+                  padding: '0.4rem 0.9rem', 
+                  background: timeLeft <= 10 ? 'rgba(255, 34, 71, 0.2)' : 'rgba(0, 240, 255, 0.1)', 
+                  border: timeLeft <= 10 ? '1px solid #ff2247' : '1px solid rgba(0, 240, 255, 0.3)',
+                  borderRadius: '20px', 
+                  fontWeight: 900,
+                  fontSize: '1rem',
+                  color: timeLeft <= 10 ? '#ff2247' : '#00f0ff'
+                }}>
                   ⏳ {timeLeft}s
                 </div>
               </div>
+
+              {/* Canvas Component */}
               <Canvas 
                 ref={canvasRef}
-                isMyTurn={serverState?.activePlayerId === user.googleId} 
+                isMyTurn={isDrawer} 
                 onPixelDraw={handlePixelDraw} 
                 onEndTurn={handleEndTurn}
                 pixelsPerTurn={serverState?.settings?.inkLimit || 1000}
               />
               
-              <button 
-                className="btn btn-primary" 
-                style={{ marginTop: '2rem' }}
-                onClick={handleEndTurn}
-              >
-                Simulate Finish Drawing
-              </button>
+              {/* Action Controls */}
+              <div style={{ marginTop: '1.25rem', width: '100%', maxWidth: '512px', display: 'flex', gap: '1rem' }}>
+                {canEndTurn && (
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ flex: 1, padding: '0.85rem' }}
+                    onClick={handleEndTurn}
+                  >
+                    ⚡ Finish Drawing Early
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : gameState === 'judging' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+              
+              <div className="glass-panel" style={{ width: '100%', maxWidth: '512px', padding: '1.2rem', marginBottom: '1rem', textAlign: 'center', borderLeft: '4px solid #ffd000' }}>
+                <span className="badge-tag" style={{ background: '#ffd000', color: '#000', marginBottom: '0.5rem' }}>JUDGING STAGE</span>
+                <h2 style={{ margin: '0.2rem 0', fontSize: '1.25rem' }}>
+                  Target Word: <span style={{ color: '#ffd000', letterSpacing: '1px' }}>{serverState?.currentWord}</span>
+                </h2>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
+                  Review the artwork below and award points (1 to 10) based on accuracy.
+                </div>
+              </div>
+
+              {/* Keep Canvas visible in read-only mode so judges & players see the drawing! */}
+              <Canvas 
+                ref={canvasRef}
+                isMyTurn={false}
+                pixelsPerTurn={serverState?.settings?.inkLimit || 1000}
+              />
+
+              {/* Scoring Panel */}
+              <div className="glass-panel" style={{ width: '100%', maxWidth: '512px', marginTop: '1rem', padding: '1.25rem', textAlign: 'center' }}>
+                {(role === 'judge' || isAdmin) ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#ffd000' }}>
+                        {role === 'judge' ? '⭐️ SUBMIT OFFICIAL SCORE:' : '⭐️ HOST / QUICK SCORE:'}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: '#64748b' }}>(1 = Poor, 10 = Masterpiece)</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.5rem' }}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+                        <button 
+                          key={num} 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.65rem 0', fontWeight: 900, fontSize: '1rem' }}
+                          onClick={() => handleSubmitScore(num)}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ color: '#94a3b8', fontSize: '0.9rem', padding: '0.5rem' }}>
+                    <span className="laser-pulse">⏳ Waiting for Referee Judge to score the drawing...</span>
+                  </div>
+                )}
+              </div>
             </div>
           ) : gameState === 'finished' ? (
-            <div className="glass-panel" style={{ flex: 1, padding: '3rem', textAlign: 'center', animation: 'fadeIn 1s ease-in' }}>
-              <h1 style={{ fontSize: '3rem', color: 'var(--accent-primary)', marginBottom: '1rem' }}>Match Complete!</h1>
+            <div className="glass-panel" style={{ width: '100%', maxWidth: '600px', padding: '3rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🏆</div>
+              <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem', color: '#00f0ff' }}>MATCH COMPLETED</h1>
               {(() => {
                 const teamAScore = serverState?.scores?.teamA || 0;
                 const teamBScore = serverState?.scores?.teamB || 0;
-                const myRole = role;
-                let result = '';
-                if (teamAScore > teamBScore) result = myRole === 'teamA' ? 'Victory!' : 'Defeat...';
-                else if (teamBScore > teamAScore) result = myRole === 'teamB' ? 'Victory!' : 'Defeat...';
-                else result = 'Tie Game!';
+                let outcome = 'TIE MATCH';
+                let outcomeColor = '#ffd000';
 
-                if (myRole === 'judge') result = 'Great Judging!';
+                if (teamAScore > teamBScore) {
+                  outcome = role === 'teamA' ? 'VICTORY!' : 'DEFEAT';
+                  outcomeColor = role === 'teamA' ? '#00ff88' : '#ff3366';
+                } else if (teamBScore > teamAScore) {
+                  outcome = role === 'teamB' ? 'VICTORY!' : 'DEFEAT';
+                  outcomeColor = role === 'teamB' ? '#00ff88' : '#ff3366';
+                }
+                if (role === 'judge') {
+                  outcome = 'MATCH ADJUDICATED!';
+                  outcomeColor = '#ffd000';
+                }
 
                 return (
                   <>
-                    <h2 style={{ fontSize: '2.5rem', color: result.includes('Victory') ? 'var(--accent-success)' : result.includes('Defeat') ? 'var(--accent-danger)' : 'white' }}>
-                      {result}
+                    <h2 style={{ fontSize: '2rem', color: outcomeColor, margin: '1rem 0' }}>
+                      {outcome}
                     </h2>
-                    <p style={{ marginTop: '2rem', fontSize: '1.2rem', color: 'var(--text-secondary)' }}>
-                      Final Scores: Team A ({teamAScore}) - Team B ({teamBScore})
-                    </p>
-                    <p style={{ marginTop: '1rem', color: 'var(--accent-secondary)' }}>
-                      Redirecting to Dashboard in a moment...
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      gap: '2rem', 
+                      margin: '1.5rem 0',
+                      background: 'rgba(255,255,255,0.03)',
+                      padding: '1rem',
+                      borderRadius: '8px'
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', color: '#00f0ff' }}>TEAM ALPHA</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 900 }}>{teamAScore}</div>
+                      </div>
+                      <div style={{ fontSize: '1.8rem', color: '#64748b' }}>VS</div>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', color: '#ff3366' }}>TEAM BETA</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 900 }}>{teamBScore}</div>
+                      </div>
+                    </div>
+                    <p style={{ color: '#00f0ff', fontSize: '0.9rem', marginTop: '1.5rem' }}>
+                      Stats updated! Redirecting to Career Dashboard in a few seconds...
                     </p>
                   </>
                 );
               })()}
             </div>
-          ) : (
-            <div className="glass-panel" style={{ flex: 1, padding: '3rem', textAlign: 'center' }}>
-              <h2 style={{ marginBottom: '2rem', color: 'var(--accent-primary)' }}>Judging Phase</h2>
-              <h3>The word was: <span style={{ fontSize: '2rem', letterSpacing: '2px' }}>{serverState?.currentWord}</span></h3>
-              
-              {role === 'judge' ? (
-                <div style={{ marginTop: '3rem' }}>
-                  <p style={{ marginBottom: '1rem' }}>Rate the drawing similarity (1-10):</p>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
-                      <button 
-                        key={num} 
-                        className="btn btn-secondary" 
-                        style={{ padding: '1rem' }}
-                        onClick={() => handleSubmitScore(num)}
-                      >
-                        {num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p style={{ marginTop: '3rem', color: 'var(--text-secondary)' }}>Waiting for judges to submit their scores...</p>
-              )}
-            </div>
-          )}
+          ) : null}
+
         </div>
       </div>
     </div>

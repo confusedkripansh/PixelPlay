@@ -153,6 +153,15 @@ func (r *RedisClient) GetStrokes(ctx context.Context, roomID string) ([][]byte, 
 	return result, nil
 }
 
+// ClearStrokes removes recorded strokes for a room when starting a new turn/round.
+func (r *RedisClient) ClearStrokes(ctx context.Context, roomID string) error {
+	if !r.IsAvailable() {
+		return nil
+	}
+	strokesKey := fmt.Sprintf("room:%s:strokes", roomID)
+	return r.Client.Del(ctx, strokesKey).Err()
+}
+
 // ClearRoom removes all keys (state, strokes) for a given room.
 func (r *RedisClient) ClearRoom(ctx context.Context, roomID string) error {
 	if !r.IsAvailable() {

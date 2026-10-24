@@ -59,14 +59,20 @@ const Canvas = forwardRef(({
   }, []);
 
   const drawSmoothStroke = (ctx, x0, y0, x1, y1, color) => {
+    if (!ctx) return;
     ctx.strokeStyle = color;
-    ctx.lineWidth = 12;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 10;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
+    // Also draw circle at ends for seamless joins
+    ctx.beginPath();
+    ctx.arc(x1, y1, 5, 0, Math.PI * 2);
+    ctx.fill();
   };
 
   const getCoordinates = (e) => {
@@ -94,11 +100,32 @@ const Canvas = forwardRef(({
     if (!isMyTurn || inkUsed >= pixelsPerTurn) return;
     if (e.type === 'touchstart') e.preventDefault();
     isDrawing.current = true;
-    lastPos.current = getCoordinates(e);
+    const pos = getCoordinates(e);
+    lastPos.current = pos;
+
+    // Render initial dot on click / touch tap
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = activeColor;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (onPixelDraw) {
+        onPixelDraw({
+          x0: pos.x,
+          y0: pos.y,
+          x1: pos.x,
+          y1: pos.y,
+          color: activeColor
+        });
+      }
+    }
   };
 
   const draw = (e) => {
-    if (!isDrawing.current || !isMyTurn || inkUsed >= pixelsPerTurn) return;
+    if (!isDrawing.current || !isMyTurn || inkUsed >= pixelsPerTurn || !lastPos.current) return;
     if (e.type === 'touchmove') e.preventDefault();
 
     const currentPos = getCoordinates(e);
@@ -111,8 +138,11 @@ const Canvas = forwardRef(({
     const dy = currentPos.y - lastPos.current.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
+    if (distance < 1) return; // skip sub-pixel jitters
+
     if (inkUsed + distance > pixelsPerTurn) {
       isDrawing.current = false;
+      lastPos.current = null;
       return;
     }
 
@@ -123,10 +153,10 @@ const Canvas = forwardRef(({
     // Notify parent to send over WebSocket
     if (onPixelDraw) {
       onPixelDraw({
-        x0: lastPos.current.x,
-        y0: lastPos.current.y,
-        x1: currentPos.x,
-        y1: currentPos.y,
+        x0: Math.round(lastPos.current.x * 10) / 10,
+        y0: Math.round(lastPos.current.y * 10) / 10,
+        x1: Math.round(currentPos.x * 10) / 10,
+        y1: Math.round(currentPos.y * 10) / 10,
         color: activeColor
       });
     }
@@ -137,6 +167,7 @@ const Canvas = forwardRef(({
   const stopDrawing = (e) => {
     if (e && e.type === 'touchend') e.preventDefault();
     isDrawing.current = false;
+    lastPos.current = null;
   };
 
   const colorPresets = [

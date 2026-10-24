@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
+import { IconSwords, IconZap, IconUser } from '../components/Icons';
 import { API_BASE_URL } from '../config';
 
 const Login = () => {
@@ -14,7 +15,7 @@ const Login = () => {
     const guestUser = {
       googleId: guestId,
       name: inGameName.trim() || `Pilot_${guestId.slice(-4)}`,
-      avatarUrl: `https://robohash.org/${guestId}?set=set4`,
+      avatarUrl: '',
       stats: { wins: 0, losses: 0, experience: 0, totalPoints: 0 }
     };
     localStorage.setItem('pixel_user', JSON.stringify(guestUser));
@@ -31,13 +32,27 @@ const Login = () => {
         borderTop: '4px solid #00f0ff',
         boxShadow: '0 0 35px rgba(0, 240, 255, 0.15)'
       }}>
-        <div style={{ fontSize: '2.5rem', marginBottom: '0.2rem' }}>⚡</div>
-        <h1 className="logo" style={{ marginBottom: '0.5rem', fontSize: '2rem' }}>
-          PIXEL<span style={{ color: '#00f0ff', textShadow: '0 0 15px rgba(0,240,255,0.6)' }}>1000</span>
+        <div style={{ 
+          width: '54px', 
+          height: '54px', 
+          borderRadius: '50%', 
+          background: 'rgba(0, 240, 255, 0.1)', 
+          border: '1px solid rgba(0, 240, 255, 0.3)',
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          margin: '0 auto 1rem'
+        }}>
+          <IconSwords size={26} color="#00f0ff" />
+        </div>
+        <h1 className="logo" style={{ marginBottom: '0.2rem', fontSize: '1.8rem', letterSpacing: '0.5px' }}>
+          PIXEL<span style={{ color: '#00f0ff', textShadow: '0 0 15px rgba(0,240,255,0.6)' }}>PLAY</span>
         </h1>
-        <h2 style={{ marginBottom: '0.5rem', fontSize: '1.2rem', color: '#f8fafc' }}>COMPETITIVE DRAWING ARENA</h2>
-        <p style={{ color: '#94a3b8', marginBottom: '1.75rem', fontSize: '0.85rem' }}>
-          Connect via Google to preserve your career stats, or jump right into the action as a guest pilot.
+        <h2 style={{ marginBottom: '0.4rem', fontSize: '0.95rem', color: '#f8fafc', fontWeight: 800, letterSpacing: '0.5px' }}>
+          COMPETITIVE DRAWING ARENA
+        </h2>
+        <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.8rem', lineHeight: '1.4' }}>
+          Sign in via Google to permanently record your career victories, or deploy instantly as an unverified guest pilot.
         </p>
 
         {errorMessage && (
@@ -47,7 +62,7 @@ const Login = () => {
         )}
 
         <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
-          <label style={{ color: '#94a3b8', display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 700 }}>
+          <label style={{ color: '#94a3b8', display: 'block', marginBottom: '0.4rem', fontSize: '0.75rem', fontWeight: 800 }}>
             CALL-SIGN / NAME (OPTIONAL)
           </label>
           <input 
@@ -63,12 +78,12 @@ const Login = () => {
               background: 'rgba(0,0,0,0.4)', 
               color: 'white', 
               outline: 'none',
-              fontWeight: 700
+              fontWeight: 800
             }}
           />
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', alignItems: 'center' }}>
           <GoogleLogin
             onSuccess={async (credentialResponse) => {
               setIsLoading(true);
@@ -97,29 +112,30 @@ const Login = () => {
               }
             }}
             onError={() => {
-              setErrorMessage('Google Sign-In failed or was cancelled.');
+              setErrorMessage('Google Sign-In was cancelled or failed.');
             }}
             theme="filled_black"
           />
 
           <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '0.75rem', margin: '0.25rem 0' }}>
             <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
-            <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 800 }}>OR DIRECT ENTRY</span>
+            <span style={{ color: '#64748b', fontSize: '0.7rem', fontWeight: 800 }}>OR DIRECT ENTRY</span>
             <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
           </div>
 
           <button 
             onClick={handleGuestLogin}
             className="btn btn-secondary"
-            style={{ width: '100%', padding: '0.8rem', fontSize: '0.85rem' }}
+            style={{ width: '100%', padding: '0.75rem', fontSize: '0.8rem' }}
           >
-            🎮 Play as Guest Recruit
+            <IconUser size={16} />
+            <span>Deploy as Guest Pilot</span>
           </button>
         </div>
 
         {isLoading && (
           <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#00f0ff' }}>
-            <span className="laser-pulse">Connecting to arena servers...</span>
+            <span className="laser-pulse">Connecting to arena cluster...</span>
           </div>
         )}
       </div>

@@ -127,29 +127,32 @@ func (s *userService) UpdateUserProfile(ctx context.Context, googleId, name, ava
 func (s *userService) UpdateGameStats(ctx context.Context, googleId string, status string, points int) error {
 	opts := options.Update().SetUpsert(true)
 	
-	// Create an empty bson.M map to hold the fields we want to mathematically increment.
 	incFields := bson.M{}
 
 	if status == "judge" {
-		// Judges just get 20 participation XP.
-		incFields["stats.experience"] = 20
+		incFields["stats.experience"] = 25
 	} else {
-		// Teams get 10 XP for participating, and we add their round points to their totalPoints.
-		incFields["stats.experience"] = 10
 		incFields["stats.totalPoints"] = points
 		
 		if status == "win" {
-			// $inc will ADD 1 to wins, rather than replacing the value.
 			incFields["stats.wins"] = 1
-			incFields["stats.experience"] = 50 // Bonus XP for winning
+			incFields["stats.experience"] = 50
 		} else if status == "loss" {
 			incFields["stats.losses"] = 1
+			incFields["stats.experience"] = 10
+		} else {
+			// Tie outcome
+			incFields["stats.experience"] = 20
 		}
 	}
 
 	filter := bson.M{"googleId": googleId}
-	// The $inc operator atomically increments mathematical values in MongoDB. This prevents race conditions.
-	update := bson.M{"$inc": incFields}
+	update := bson.M{
+		"$inc": incFields,
+		"$setOnInsert": bson.M{
+			"createdAt": time.Now(),
+		},
+	}
 
 	_, err := s.db.Collection("users").UpdateOne(ctx, filter, update, opts)
 	return err

@@ -521,13 +521,32 @@ func (r *Room) UpdateStats() {
 		winningTeam = "tie"
 	}
 
-	// Combine active and disconnected participants
+	// 1. Combine active clients, disconnected clients, and full state rosters
 	allPlayers := make(map[string]string)
 	for client := range r.Clients {
-		allPlayers[client.UserID] = client.Role
+		if client.UserID != "" {
+			allPlayers[client.UserID] = client.Role
+		}
 	}
 	for _, client := range r.Disconnected {
-		allPlayers[client.UserID] = client.Role
+		if client.UserID != "" {
+			allPlayers[client.UserID] = client.Role
+		}
+	}
+	for _, p := range r.State.TeamA {
+		if p.UserID != "" && allPlayers[p.UserID] == "" {
+			allPlayers[p.UserID] = "teamA"
+		}
+	}
+	for _, p := range r.State.TeamB {
+		if p.UserID != "" && allPlayers[p.UserID] == "" {
+			allPlayers[p.UserID] = "teamB"
+		}
+	}
+	for _, p := range r.State.Judges {
+		if p.UserID != "" && allPlayers[p.UserID] == "" {
+			allPlayers[p.UserID] = "judge"
+		}
 	}
 
 	playerResults := make(map[string]map[string]interface{})
@@ -538,8 +557,9 @@ func (r *Room) UpdateStats() {
 		}
 
 		status := "tie"
-		xpEarned := 10
+		xpEarned := 20
 		pointsEarned := 0
+
 		if role == "judge" {
 			status = "judge"
 			xpEarned = 25
@@ -553,6 +573,7 @@ func (r *Room) UpdateStats() {
 			xpEarned = 10
 			pointsEarned = r.Scores[role]
 		} else {
+			status = "tie"
 			xpEarned = 20
 			pointsEarned = r.Scores[role]
 		}
@@ -564,14 +585,12 @@ func (r *Room) UpdateStats() {
 			"pointsEarned": pointsEarned,
 		}
 
-		// Asynchronously push updates to the Worker Pool for registered users
-		if len(uid) < 6 || uid[:6] != "guest-" {
-			r.UserService.QueueGameStatsUpdate(uid, status, pointsEarned)
-			log.Printf("Queued game stats update for user %s: status=%s, pts=%d, xp=%d", uid, status, pointsEarned, xpEarned)
-		}
+		// Asynchronously update MongoDB for EVERY user (both Google pilots & guests)
+		r.UserService.QueueGameStatsUpdate(uid, status, pointsEarned)
+		log.Printf("Queued career stats update for user %s: status=%s, pts=%d, xp=%d", uid, status, pointsEarned, xpEarned)
 	}
 
-	// Broadcast match summary so frontends (including guests) can update stats immediately
+	// Broadcast match summary so frontends update immediately (GUARANTEED delivery)
 	summaryMsg, _ := json.Marshal(map[string]interface{}{
 		"type": "match_summary",
 		"payload": map[string]interface{}{
@@ -580,10 +599,15 @@ func (r *Room) UpdateStats() {
 			"results":     playerResults,
 		},
 	})
+
+	// Deliver immediately to local clients
 	select {
-	case r.Broadcast <- summaryMsg:
+	case r.LocalBroadcast <- summaryMsg:
 	default:
 	}
+
+	// And broadcast to the room outbound channel
+	r.Broadcast <- summaryMsg
 }
 
 // ServeWS handles the initial HTTP request and upgrades it to a WebSocket.

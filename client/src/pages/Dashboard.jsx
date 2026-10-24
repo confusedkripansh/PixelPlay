@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PilotAvatar from '../components/PilotAvatar';
+import { 
+  IconSwords, 
+  IconTrophy, 
+  IconZap, 
+  IconLogout, 
+  IconDashboard, 
+  IconShield,
+  IconBrush 
+} from '../components/Icons';
 import { API_BASE_URL } from '../config';
 
 const Dashboard = () => {
@@ -24,7 +34,6 @@ const Dashboard = () => {
       .then(res => res.json())
       .then(data => {
         if (!data.error && data.stats) {
-          // Merge server stats with any higher local stats
           const mergedStats = {
             wins: Math.max(data.stats.wins || 0, localStats.wins || 0),
             losses: Math.max(data.stats.losses || 0, localStats.losses || 0),
@@ -63,7 +72,6 @@ const Dashboard = () => {
       }
     } catch (e) {
       console.error(e);
-      // Fallback save locally
       setIsEditing(false);
       const updatedUser = { ...user, name: editName, avatarUrl: editAvatar };
       localStorage.setItem('pixel_user', JSON.stringify(updatedUser));
@@ -78,26 +86,40 @@ const Dashboard = () => {
   if (!userStats) {
     return (
       <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center' }}>
-        <h2 style={{ color: '#00f0ff' }}>Loading Arena Profile...</h2>
+        <h2 style={{ color: '#00f0ff', letterSpacing: '1px' }}>SYNCHRONIZING DOSSIER...</h2>
       </div>
     );
   }
 
   const totalMatches = (userStats.wins || 0) + (userStats.losses || 0);
   const winRate = totalMatches > 0 ? Math.round((userStats.wins / totalMatches) * 100) : 0;
-  const playerLevel = Math.floor((userStats.experience || 0) / 100) + 1;
+  const playerTier = Math.floor((userStats.experience || 0) / 100) + 1;
+  const xpInTier = (userStats.experience || 0) % 100;
+
+  const getTierTitle = (tier) => {
+    if (tier >= 10) return 'CYBER TITAN';
+    if (tier >= 7) return 'MASTER ARTIST';
+    if (tier >= 4) return 'VANGUARD PILOT';
+    if (tier >= 2) return 'ARENA STRIKER';
+    return 'RECRUIT PILOT';
+  };
 
   return (
-    <div className="app-container" style={{ padding: '2rem', maxWidth: '900px', margin: '0 auto' }}>
+    <div className="app-container" style={{ padding: '2rem', maxWidth: '880px', margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
-          <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', fontWeight: 800 }}>PILOT RECORD</div>
-          <h1 style={{ color: '#00f0ff', margin: 0, textShadow: '0 0 15px rgba(0,240,255,0.4)' }}>Career Dashboard</h1>
+          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', fontWeight: 800 }}>
+            TACTICAL DOSSIER
+          </div>
+          <h1 style={{ color: '#00f0ff', margin: 0, fontSize: '1.75rem', letterSpacing: '0.5px' }}>
+            CAREER DASHBOARD
+          </h1>
         </div>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button className="btn btn-primary" onClick={() => navigate('/lobby')}>
-            ⚔️ Enter Lobby
+        <div style={{ display: 'flex', gap: '0.85rem' }}>
+          <button className="btn btn-primary" onClick={() => navigate('/lobby')} style={{ padding: '0.55rem 1.1rem' }}>
+            <IconSwords size={16} />
+            <span>Enter Lobby</span>
           </button>
           <button 
             className="btn btn-secondary" 
@@ -105,50 +127,43 @@ const Dashboard = () => {
             style={{ 
               color: '#ff3366', 
               borderColor: 'rgba(255, 51, 102, 0.4)', 
-              background: 'rgba(255, 51, 102, 0.1)' 
+              background: 'rgba(255, 51, 102, 0.1)',
+              padding: '0.55rem 1rem'
             }}
           >
-            Logout
+            <IconLogout size={16} color="#ff3366" />
+            <span>Exit</span>
           </button>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '2rem' }}>
+      <div style={{ display: 'flex', gap: '1.75rem' }}>
         {/* Profile Card */}
         <div className="glass-panel" style={{ flex: 1, padding: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', borderLeft: '4px solid #00f0ff' }}>
-          <div style={{ position: 'relative', marginBottom: '1.25rem' }}>
-            <img 
-              src={editAvatar} 
-              alt="avatar" 
-              style={{ 
-                width: '120px', 
-                height: '120px', 
-                borderRadius: '50%', 
-                border: '3px solid #00f0ff',
-                boxShadow: '0 0 20px rgba(0, 240, 255, 0.3)'
-              }} 
-            />
+          <div style={{ position: 'relative', marginBottom: '1rem' }}>
+            <PilotAvatar src={editAvatar} name={editName} size={110} border="#00f0ff" glow={true} />
             <span className="badge-tag" style={{ 
               position: 'absolute', 
-              bottom: '-5px', 
+              bottom: '-8px', 
               left: '50%', 
               transform: 'translateX(-50%)',
               background: '#00f0ff',
               color: '#000',
-              fontWeight: 800,
-              boxShadow: '0 0 10px #00f0ff'
+              fontWeight: 900,
+              boxShadow: '0 0 10px #00f0ff',
+              whiteSpace: 'nowrap'
             }}>
-              LVL {playerLevel}
+              TIER {playerTier}
             </span>
           </div>
           
           {isEditing ? (
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem' }}>
               <input 
                 type="text" 
                 value={editName} 
                 onChange={e => setEditName(e.target.value)} 
-                placeholder="In-Game Call-sign" 
+                placeholder="Call-sign" 
                 style={{ padding: '0.6rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(0, 240, 255, 0.3)', borderRadius: '6px' }} 
               />
               <input 
@@ -158,18 +173,30 @@ const Dashboard = () => {
                 placeholder="Avatar URL" 
                 style={{ padding: '0.6rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(0, 240, 255, 0.3)', borderRadius: '6px' }} 
               />
-              <button className="btn btn-primary" onClick={handleSaveProfile} style={{ width: '100%' }}>Save Changes</button>
+              <button className="btn btn-primary" onClick={handleSaveProfile} style={{ width: '100%' }}>Save</button>
               <button className="btn btn-secondary" onClick={() => setIsEditing(false)} style={{ width: '100%' }}>Cancel</button>
             </div>
           ) : (
             <>
-              <h2 style={{ fontSize: '1.3rem', margin: '0.5rem 0 0.2rem' }}>{editName}</h2>
-              <span className="badge-tag" style={{ background: 'rgba(255,255,255,0.08)', color: '#94a3b8', marginBottom: '1rem' }}>
-                {user.googleId.startsWith('guest-') ? 'GUEST RECRUIT' : 'VERIFIED PILOT'}
+              <h2 style={{ fontSize: '1.3rem', margin: '0.75rem 0 0.15rem' }}>{editName}</h2>
+              <span style={{ fontSize: '0.75rem', color: '#00f0ff', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '1.5rem' }}>
+                {getTierTitle(playerTier)}
               </span>
+
+              {/* Progress to next tier */}
+              <div style={{ width: '100%', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#94a3b8', marginBottom: '0.3rem', fontWeight: 700 }}>
+                  <span>TIER PROGRESS</span>
+                  <span>{xpInTier}/100 XP</span>
+                </div>
+                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ width: `${xpInTier}%`, height: '100%', background: 'linear-gradient(90deg, #00d2ff, #00f0ff)', boxShadow: '0 0 8px #00f0ff' }} />
+                </div>
+              </div>
+
               <button 
                 className="btn btn-secondary" 
-                style={{ width: '100%', marginTop: 'auto', fontSize: '0.8rem' }} 
+                style={{ width: '100%', marginTop: 'auto', fontSize: '0.75rem' }} 
                 onClick={() => setIsEditing(true)}
               >
                 Edit Call-sign
@@ -179,49 +206,49 @@ const Dashboard = () => {
         </div>
 
         {/* Stats Grid */}
-        <div className="glass-panel" style={{ flex: 2, padding: '2rem' }}>
+        <div className="glass-panel" style={{ flex: 1.8, padding: '2rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h2 style={{ color: '#ffd000', margin: 0, fontSize: '1.25rem', letterSpacing: '0.5px' }}>
-              COMPETITIVE METRICS
+            <h2 style={{ color: '#ffd000', margin: 0, fontSize: '1.15rem', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <IconTrophy size={18} color="#ffd000" /> ARENA COMBAT METRICS
             </h2>
-            <span className="badge-live">LIVE CAREER</span>
+            <span className="badge-live">VERIFIED RECORDS</span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
             {/* Wins */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(0, 255, 136, 0.25)', padding: '1.2rem', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#00ff88', textTransform: 'uppercase', fontWeight: 800 }}>VICTORIES</div>
-              <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#00ff88', marginTop: '0.2rem' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(0, 255, 136, 0.25)', padding: '1.1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.7rem', color: '#00ff88', textTransform: 'uppercase', fontWeight: 800 }}>VICTORIES</div>
+              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#00ff88', marginTop: '0.1rem' }}>
                 {userStats.wins}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Matches Won</div>
+              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Matches Won</div>
             </div>
 
             {/* Losses */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255, 51, 102, 0.25)', padding: '1.2rem', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#ff3366', textTransform: 'uppercase', fontWeight: 800 }}>DEFEATS</div>
-              <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#ff3366', marginTop: '0.2rem' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255, 51, 102, 0.25)', padding: '1.1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.7rem', color: '#ff3366', textTransform: 'uppercase', fontWeight: 800 }}>DEFEATS</div>
+              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#ff3366', marginTop: '0.1rem' }}>
                 {userStats.losses}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Matches Lost</div>
+              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Matches Lost</div>
             </div>
 
             {/* Win Rate */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(0, 240, 255, 0.25)', padding: '1.2rem', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#00f0ff', textTransform: 'uppercase', fontWeight: 800 }}>WIN RATIO</div>
-              <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#00f0ff', marginTop: '0.2rem' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(0, 240, 255, 0.25)', padding: '1.1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.7rem', color: '#00f0ff', textTransform: 'uppercase', fontWeight: 800 }}>WIN RATIO</div>
+              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#00f0ff', marginTop: '0.1rem' }}>
                 {winRate}%
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Across {totalMatches} Matches</div>
+              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Across {totalMatches} Matches</div>
             </div>
 
             {/* Total Points */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255, 208, 0, 0.25)', padding: '1.2rem', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#ffd000', textTransform: 'uppercase', fontWeight: 800 }}>ARENA POINTS</div>
-              <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#ffd000', marginTop: '0.2rem' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255, 208, 0, 0.25)', padding: '1.1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.7rem', color: '#ffd000', textTransform: 'uppercase', fontWeight: 800 }}>TOTAL SCORE</div>
+              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#ffd000', marginTop: '0.1rem' }}>
                 {userStats.totalPoints}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{userStats.experience} Total XP</div>
+              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{userStats.experience} Total XP</div>
             </div>
           </div>
         </div>

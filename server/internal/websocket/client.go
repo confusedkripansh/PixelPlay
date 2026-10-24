@@ -230,8 +230,7 @@ func (c *Client) ReadPump() {
 			c.Room.State.Status = "playing"
 			c.Room.State.CurrentRound = 1
 			c.Room.State.ActiveTeam = "teamA"
-			c.Room.TeamATurnCount = 0
-			c.Room.TeamBTurnCount = 0
+			c.Room.State.JudgeSubmissions = make(map[string]int)
 
 			// Clean slate for strokes: clear RAM, clear Redis
 			c.Room.Strokes = []models.Stroke{}
@@ -243,16 +242,17 @@ func (c *Client) ReadPump() {
 				}(c.Room.ID)
 			}
 			
-			// Round robin selection for Team A drawer
+			// Round robin setup for Team Alpha collective drawing
 			var teamAMembers []string
 			for client := range c.Room.Clients {
 				if client.Role == "teamA" {
 					teamAMembers = append(teamAMembers, client.UserID)
 				}
 			}
+			c.Room.State.TotalTeamSteps = len(teamAMembers)
+			c.Room.State.ActiveTeamStep = 0
 			if len(teamAMembers) > 0 {
-				c.Room.State.ActivePlayerID = teamAMembers[c.Room.TeamATurnCount%len(teamAMembers)]
-				c.Room.TeamATurnCount++
+				c.Room.State.ActivePlayerID = teamAMembers[0]
 			} else {
 				c.Room.State.ActivePlayerID = ""
 			}
@@ -270,10 +270,25 @@ func (c *Client) ReadPump() {
 			go c.Room.BroadcastState()
 		} else if wsMsg.Type == "end_turn" {
 			c.Room.mu.Lock()
-			if c.Room.State.Status == "playing" {
-				// Allow active drawer or room host to end drawing turn early
-				if c.UserID == c.Room.State.ActivePlayerID || c.UserID == c.Room.State.AdminID {
+			// STRICT PERMISSION: Only the active drawer can finish their turn/step early! Host cannot force early finish.
+			if c.Room.State.Status == "playing" && c.UserID == c.Room.State.ActivePlayerID {
+				var activeTeamMembers []string
+				for client := range c.Room.Clients {
+					if client.Role == c.Room.State.ActiveTeam {
+						activeTeamMembers = append(activeTeamMembers, client.UserID)
+					}
+				}
+
+				c.Room.State.TotalTeamSteps = len(activeTeamMembers)
+				c.Room.State.ActiveTeamStep++
+
+				if c.Room.State.ActiveTeamStep < c.Room.State.TotalTeamSteps && len(activeTeamMembers) > c.Room.State.ActiveTeamStep {
+					// Rotate to the next teammate to continue the single collective drawing! Canvas is preserved.
+					c.Room.State.ActivePlayerID = activeTeamMembers[c.Room.State.ActiveTeamStep]
+				} else {
+					// All players on the team have completed their drawing step for this word -> judging!
 					c.Room.State.Status = "judging"
+					c.Room.State.JudgeSubmissions = make(map[string]int)
 				}
 			}
 			c.Room.mu.Unlock()
@@ -284,63 +299,59 @@ func (c *Client) ReadPump() {
 			}
 			if err := json.Unmarshal(wsMsg.Payload, &scorePayload); err == nil {
 				c.Room.mu.Lock()
-				// Allow Judges OR Room Admin to submit scores (allows host simulation in tests)
-				if (c.Role == "judge" || c.UserID == c.Room.State.AdminID) && c.Room.State.Status == "judging" {
-					c.Room.Scores[c.Room.State.ActiveTeam] += scorePayload.Score
-					
-					// Clear strokes for the upcoming turn
-					c.Room.Strokes = []models.Stroke{}
-					if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
-						go func(rid string) {
-							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-							defer cancel()
-							_ = c.Room.RedisClient.ClearStrokes(ctx, rid)
-						}(c.Room.ID)
+				// STRICT PERMISSION: Only Judges/Referees can score the drawing! Host cannot rate unless they are a judge.
+				if c.Role == "judge" && c.Room.State.Status == "judging" {
+					if c.Room.State.JudgeSubmissions == nil {
+						c.Room.State.JudgeSubmissions = make(map[string]int)
+					}
+					if scorePayload.Score >= 1 && scorePayload.Score <= 10 {
+						c.Room.State.JudgeSubmissions[c.UserID] = scorePayload.Score
 					}
 
-					if c.Room.State.ActiveTeam == "teamA" {
-						// Team A finished their word. Now Team B draws their word!
-						c.Room.State.ActiveTeam = "teamB"
-						c.Room.State.Status = "playing"
-
-						// Round Robin selection for Team B drawer
-						var teamBMembers []string
-						for client := range c.Room.Clients {
-							if client.Role == "teamB" {
-								teamBMembers = append(teamBMembers, client.UserID)
-							}
+					// Count total connected judges in the match
+					totalJudgesCount := 0
+					for client := range c.Room.Clients {
+						if client.Role == "judge" {
+							totalJudgesCount++
 						}
-						if len(teamBMembers) > 0 {
-							c.Room.State.ActivePlayerID = teamBMembers[c.Room.TeamBTurnCount%len(teamBMembers)]
-							c.Room.TeamBTurnCount++
-						} else {
-							c.Room.State.ActivePlayerID = ""
+					}
+
+					// When all judges have submitted their rating, compute the mean score and advance
+					if len(c.Room.State.JudgeSubmissions) >= totalJudgesCount && totalJudgesCount > 0 {
+						sum := 0
+						for _, sc := range c.Room.State.JudgeSubmissions {
+							sum += sc
+						}
+						meanScore := (sum + len(c.Room.State.JudgeSubmissions)/2) / len(c.Room.State.JudgeSubmissions)
+						c.Room.Scores[c.Room.State.ActiveTeam] += meanScore
+						c.Room.State.LastMeanScore = meanScore
+
+						// Clear strokes for the next team's new word
+						c.Room.Strokes = []models.Stroke{}
+						if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
+							go func(rid string) {
+								ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+								defer cancel()
+								_ = c.Room.RedisClient.ClearStrokes(ctx, rid)
+							}(c.Room.ID)
 						}
 
-						nextWord := words.GetRandomWord(c.Room.State.UsedWords)
-						c.Room.State.CurrentWord = nextWord
-						c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
-					} else {
-						// Team B finished their word! That completes 1 full round for both teams.
-						c.Room.State.CurrentRound++
-
-						// End match if max rounds reached, otherwise rotate to Team A for next round
-						if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
-							c.Room.State.Status = "finished"
-							go c.Room.UpdateStats()
-						} else {
-							c.Room.State.ActiveTeam = "teamA"
+						if c.Room.State.ActiveTeam == "teamA" {
+							// Team Alpha finished their collective drawing. Now Team Beta draws Word 2 collectively!
+							c.Room.State.ActiveTeam = "teamB"
 							c.Room.State.Status = "playing"
+							c.Room.State.JudgeSubmissions = make(map[string]int)
 
-							var teamAMembers []string
+							var teamBMembers []string
 							for client := range c.Room.Clients {
-								if client.Role == "teamA" {
-									teamAMembers = append(teamAMembers, client.UserID)
+								if client.Role == "teamB" {
+									teamBMembers = append(teamBMembers, client.UserID)
 								}
 							}
-							if len(teamAMembers) > 0 {
-								c.Room.State.ActivePlayerID = teamAMembers[c.Room.TeamATurnCount%len(teamAMembers)]
-								c.Room.TeamATurnCount++
+							c.Room.State.TotalTeamSteps = len(teamBMembers)
+							c.Room.State.ActiveTeamStep = 0
+							if len(teamBMembers) > 0 {
+								c.Room.State.ActivePlayerID = teamBMembers[0]
 							} else {
 								c.Room.State.ActivePlayerID = ""
 							}
@@ -348,18 +359,51 @@ func (c *Client) ReadPump() {
 							nextWord := words.GetRandomWord(c.Room.State.UsedWords)
 							c.Room.State.CurrentWord = nextWord
 							c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
+						} else {
+							// Team Beta finished Word 2! That completes 1 full round for both teams.
+							c.Room.State.CurrentRound++
+
+							if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
+								// Match complete!
+								c.Room.State.Status = "finished"
+								go c.Room.UpdateStats()
+							} else {
+								// Next round begins with Team Alpha!
+								c.Room.State.ActiveTeam = "teamA"
+								c.Room.State.Status = "playing"
+								c.Room.State.JudgeSubmissions = make(map[string]int)
+
+								var teamAMembers []string
+								for client := range c.Room.Clients {
+									if client.Role == "teamA" {
+										teamAMembers = append(teamAMembers, client.UserID)
+									}
+								}
+								c.Room.State.TotalTeamSteps = len(teamAMembers)
+								c.Room.State.ActiveTeamStep = 0
+								if len(teamAMembers) > 0 {
+									c.Room.State.ActivePlayerID = teamAMembers[0]
+								} else {
+									c.Room.State.ActivePlayerID = ""
+								}
+
+								nextWord := words.GetRandomWord(c.Room.State.UsedWords)
+								c.Room.State.CurrentWord = nextWord
+								c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
+							}
 						}
+
+						c.Room.mu.Unlock()
+
+						// Broadcast clear canvas so the board is clean for the new team's word
+						clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
+						c.Room.Broadcast <- clearCanvasMsg
+						go c.Room.BroadcastState()
+						return
 					}
-					c.Room.mu.Unlock()
-
-					// Broadcast clear_canvas so everyone's screen wipes clean for the next word/turn
-					clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
-					c.Room.Broadcast <- clearCanvasMsg
-
-					go c.Room.BroadcastState()
-				} else {
-					c.Room.mu.Unlock()
 				}
+				c.Room.mu.Unlock()
+				go c.Room.BroadcastState()
 			}
 		} else {
 			// If it's a generic chat message, just broadcast it to everyone.

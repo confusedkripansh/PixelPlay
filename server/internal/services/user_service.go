@@ -112,15 +112,23 @@ func (s *userService) GetUserProfile(ctx context.Context, googleId string) (*mod
 }
 
 func (s *userService) UpdateUserProfile(ctx context.Context, googleId, name, avatarUrl string) error {
+	opts := options.Update().SetUpsert(true)
 	update := bson.M{
 		"$set": bson.M{
 			"name":      name,
 			"avatarUrl": avatarUrl,
 		},
+		"$setOnInsert": bson.M{
+			"createdAt": time.Now(),
+			"stats": models.UserStats{
+				Wins:        0,
+				Losses:      0,
+				Experience:  0,
+				TotalPoints: 0,
+			},
+		},
 	}
-	// We use UpdateOne. The underscore "_" means we are ignoring the first return value (the update result summary),
-	// because we only care if there was an error.
-	_, err := s.db.Collection("users").UpdateOne(ctx, bson.M{"googleId": googleId}, update)
+	_, err := s.db.Collection("users").UpdateOne(ctx, bson.M{"googleId": googleId}, update, opts)
 	return err
 }
 

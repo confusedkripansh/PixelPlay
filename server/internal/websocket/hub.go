@@ -114,6 +114,9 @@ func (r *Room) GetFullState() models.GameState {
 	state.Settings = r.Settings
 	state.MaxRounds = r.Settings.MaxRounds
 	state.AdminID = r.State.AdminID
+	if state.JudgeSubmissions == nil {
+		state.JudgeSubmissions = make(map[string]int)
+	}
 
 	// 1. Add active local clients
 	for client := range r.Clients {
@@ -590,7 +593,7 @@ func (r *Room) UpdateStats() {
 		log.Printf("Queued career stats update for user %s: status=%s, pts=%d, xp=%d", uid, status, pointsEarned, xpEarned)
 	}
 
-	// Broadcast match summary so frontends update immediately (GUARANTEED delivery)
+	// Broadcast match summary so frontends update immediately (sent once via r.Broadcast)
 	summaryMsg, _ := json.Marshal(map[string]interface{}{
 		"type": "match_summary",
 		"payload": map[string]interface{}{
@@ -600,13 +603,7 @@ func (r *Room) UpdateStats() {
 		},
 	})
 
-	// Deliver immediately to local clients
-	select {
-	case r.LocalBroadcast <- summaryMsg:
-	default:
-	}
-
-	// And broadcast to the room outbound channel
+	// Broadcast to the room outbound channel (which forwards once to local clients and Redis)
 	r.Broadcast <- summaryMsg
 }
 

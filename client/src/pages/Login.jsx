@@ -29,34 +29,35 @@ const Login = () => {
         textAlign: 'center', 
         maxWidth: '420px', 
         width: '100%',
-        borderTop: '4px solid #00f0ff',
-        boxShadow: '0 0 35px rgba(0, 240, 255, 0.15)'
+        borderTop: '4px solid #ffd000',
+        boxShadow: '0 0 35px rgba(255, 208, 0, 0.15)'
       }}>
         <div style={{ 
           width: '54px', 
           height: '54px', 
-          borderRadius: '50%', 
-          background: 'rgba(0, 240, 255, 0.1)', 
-          border: '1px solid rgba(0, 240, 255, 0.3)',
+          borderRadius: '8px', 
+          background: 'rgba(255, 208, 0, 0.15)', 
+          border: '1px solid #ffd000',
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center',
-          margin: '0 auto 1rem'
+          margin: '0 auto 1rem',
+          boxShadow: '0 0 15px rgba(255, 208, 0, 0.25)'
         }}>
-          <IconSwords size={26} color="#00f0ff" />
+          <IconSwords size={26} color="#ffd000" />
         </div>
         <h1 className="logo" style={{ marginBottom: '0.2rem', fontSize: '1.8rem', letterSpacing: '0.5px' }}>
-          PIXEL<span style={{ color: '#00f0ff', textShadow: '0 0 15px rgba(0,240,255,0.6)' }}>PLAY</span>
+          PIXEL<span style={{ color: '#ffd000' }}>PLAY</span>
         </h1>
         <h2 style={{ marginBottom: '0.4rem', fontSize: '0.95rem', color: '#f8fafc', fontWeight: 800, letterSpacing: '0.5px' }}>
-          COMPETITIVE DRAWING ARENA
+          COMPETITIVE DRAWING CONTEST
         </h2>
         <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.8rem', lineHeight: '1.4' }}>
-          Sign in via Google to permanently record your career victories, or deploy instantly as an unverified guest pilot.
+          Sign in via Google to permanently record your tournament career, or deploy instantly as an unverified guest pilot.
         </p>
 
         {errorMessage && (
-          <div style={{ background: 'rgba(255, 34, 71, 0.15)', border: '1px solid #ff2247', color: '#fca5a5', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.8rem', textAlign: 'left' }}>
+          <div style={{ background: 'rgba(255, 51, 102, 0.15)', border: '1px solid #ff3366', color: '#fca5a5', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.8rem', textAlign: 'left' }}>
             {errorMessage}
           </div>
         )}
@@ -74,8 +75,8 @@ const Login = () => {
               width: '100%', 
               padding: '0.75rem', 
               borderRadius: '6px', 
-              border: '1px solid rgba(0, 240, 255, 0.3)', 
-              background: 'rgba(0,0,0,0.4)', 
+              border: '1px solid rgba(255, 208, 0, 0.4)', 
+              background: '#111319', 
               color: 'white', 
               outline: 'none',
               fontWeight: 800
@@ -134,7 +135,7 @@ const Login = () => {
         </div>
 
         {isLoading && (
-          <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#00f0ff' }}>
+          <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#ffd000' }}>
             <span className="laser-pulse">Connecting to arena cluster...</span>
           </div>
         )}

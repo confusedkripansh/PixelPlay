@@ -1,20 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;600;700;800;900&display=swap');
 
 :root {
-  /* Esports & Cyberpunk Gaming Palette (Purged Generic Purple) */
-  --bg-primary: #07090e;
-  --bg-secondary: #0d1118;
-  --bg-tertiary: #131924;
-  --bg-surface: #1a2232;
+  /* Competitive Contest Theme (Inspired by Cloudflight Coding Contest) */
+  --bg-primary: #0a0b0e;
+  --bg-secondary: #111319;
+  --bg-tertiary: #171b24;
+  --bg-surface: #1e2330;
   
-  /* High Voltage Neon Accents */
-  --accent-primary: #00f0ff;    /* Electric Cyber Cyan */
-  --accent-secondary: #ff3366;  /* Neon Laser Coral / Crimson */
-  --accent-gold: #ffd000;       /* Arcade Trophy Gold */
-  --accent-emerald: #00ff88;    /* Matrix Neon Lime */
-  --accent-success: #00ff88;
-  --accent-danger: #ff2247;
-  --accent-blue: #0088ff;
+  /* Primary Contest Gold & Neon Accents */
+  --accent-gold: #ffd000;       /* Signature Contest Canary Yellow */
+  --accent-primary: #ffd000;    /* Primary Brand Highlight */
+  --accent-cyan: #00f0ff;       /* Team Alpha Blue */
+  --accent-coral: #ff3366;      /* Team Beta Red */
+  --accent-secondary: #00f0ff;
+  --accent-emerald: #10b981;    /* Verified Success Green */
+  --accent-danger: #ff3366;
 
   --team-a: #00f0ff;
   --team-b: #ff3366;
@@ -24,11 +24,11 @@
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
   
-  /* Tactical Gaming Glass */
-  --glass-bg: rgba(13, 17, 24, 0.78);
-  --glass-border: rgba(0, 240, 255, 0.15);
-  --glass-border-hot: rgba(255, 51, 102, 0.25);
-  --glass-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.05);
+  /* Precision Contest Cards */
+  --card-bg: rgba(17, 19, 25, 0.9);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-gold: rgba(255, 208, 0, 0.35);
+  --card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.9);
 
   /* Typography */
   --font-sans: 'Inter', system-ui, sans-serif;
@@ -49,8 +49,8 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background-image: 
-    radial-gradient(circle at 10% 15%, rgba(0, 240, 255, 0.07), transparent 35%),
-    radial-gradient(circle at 90% 85%, rgba(255, 51, 102, 0.06), transparent 35%),
+    radial-gradient(circle at 15% 15%, rgba(255, 208, 0, 0.04), transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(0, 240, 255, 0.04), transparent 40%),
     linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
   background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
@@ -61,32 +61,31 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.5px;
 }
 
-/* Tactical Esports Glass Panel */
+/* Competitive Card Panel */
 .glass-panel {
-  background: var(--glass-bg);
+  background: var(--card-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: var(--card-shadow);
   position: relative;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .glass-panel:hover {
-  border-color: rgba(0, 240, 255, 0.3);
-  box-shadow: 0 12px 35px -10px rgba(0, 0, 0, 0.9), 0 0 25px rgba(0, 240, 255, 0.09);
+  border-color: rgba(255, 208, 0, 0.3);
 }
 
-/* High Voltage Buttons */
+/* High Voltage Contest Buttons (Cloudflight Style) */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.4rem;
-  border-radius: 8px;
-  font-weight: 700;
+  padding: 0.7rem 1.4rem;
+  border-radius: 6px;
+  font-weight: 800;
   font-family: var(--font-display);
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -95,28 +94,35 @@ h1, h2, h3, h4, h5, h6 {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   border: none;
   outline: none;
-  position: relative;
-  overflow: hidden;
 }
 
 .btn:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 
+/* Primary Canary Yellow Button with Bold Jet-Black Text */
 .btn-primary {
-  background: linear-gradient(135deg, #00f0ff 0%, #0099ff 100%);
-  color: #05070a;
-  font-weight: 800;
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: #ffd000;
+  color: #000000;
+  font-weight: 900;
+  box-shadow: 0 4px 16px rgba(255, 208, 0, 0.3);
 }
 
 .btn-primary:hover {
+  background: #ffe033;
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(0, 240, 255, 0.55);
-  background: linear-gradient(135deg, #33f3ff 0%, #00b4ff 100%);
+  box-shadow: 0 6px 22px rgba(255, 208, 0, 0.5);
 }
 
+.btn-primary:disabled {
+  background: rgba(255, 208, 0, 0.25);
+  color: rgba(0, 0, 0, 0.5);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Dark Secondary Action Button */
 .btn-secondary {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -125,23 +131,35 @@ h1, h2, h3, h4, h5, h6 {
 
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(0, 240, 255, 0.4);
+  border-color: #ffd000;
+  color: #ffd000;
   transform: translateY(-2px);
-  color: #00f0ff;
-  box-shadow: 0 4px 15px rgba(0, 240, 255, 0.12);
 }
 
+/* Outline Gold Button */
+.btn-outline-gold {
+  background: transparent;
+  color: #ffd000;
+  border: 1px solid #ffd000;
+}
+
+.btn-outline-gold:hover {
+  background: rgba(255, 208, 0, 0.1);
+  box-shadow: 0 0 15px rgba(255, 208, 0, 0.25);
+}
+
+/* Hot Crimson Button */
 .btn-hot {
-  background: linear-gradient(135deg, #ff3366 0%, #ff5e3a 100%);
+  background: #ff3366;
   color: #ffffff;
   font-weight: 800;
-  box-shadow: 0 4px 18px rgba(255, 51, 102, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 16px rgba(255, 51, 102, 0.35);
 }
 
 .btn-hot:hover {
+  background: #ff4d79;
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(255, 51, 102, 0.55);
+  box-shadow: 0 6px 22px rgba(255, 51, 102, 0.5);
 }
 
 /* App Container */
@@ -154,35 +172,35 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
 }
 
-/* Gaming Badges */
+/* Badges */
 .badge-live {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-  background: rgba(0, 255, 136, 0.12);
-  color: #00ff88;
-  border: 1px solid rgba(0, 255, 136, 0.3);
+  background: #ffd000;
+  color: #000;
 }
 
 .badge-tag {
   display: inline-flex;
   align-items: center;
+  gap: 0.3rem;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-size: 0.7rem;
   font-family: var(--font-gaming);
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 
-/* Custom Neon Range Sliders */
+/* Custom Sliders */
 input[type=range] {
   -webkit-appearance: none;
   background: transparent;
@@ -198,18 +216,17 @@ input[type=range]::-webkit-slider-runnable-track {
   cursor: pointer;
   background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 input[type=range]::-webkit-slider-thumb {
   height: 18px;
   width: 18px;
   border-radius: 50%;
-  background: #00f0ff;
+  background: #ffd000;
   cursor: pointer;
   -webkit-appearance: none;
   margin-top: -6px;
-  box-shadow: 0 0 10px #00f0ff;
+  box-shadow: 0 0 10px #ffd000;
   transition: transform 0.1s ease;
 }
 
@@ -217,29 +234,44 @@ input[type=range]::-webkit-slider-thumb:hover {
   transform: scale(1.2);
 }
 
-/* Animations */
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+/* Level Up & Achievement Animations */
+@keyframes levelUpPop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 25px rgba(0, 240, 255, 0.7);
-  }
-}
-
-@keyframes laserPulse {
-  0%, 100% {
+    transform: scale(1.15);
     opacity: 1;
   }
-  50% {
-    opacity: 0.4;
+  100% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
-.pulse-glow {
-  animation: pulseGlow 2s infinite;
+@keyframes goldGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(255, 208, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(255, 208, 0, 0.8);
+  }
+}
+
+.level-up-pop {
+  animation: levelUpPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.gold-glow {
+  animation: goldGlow 2s infinite;
 }
 
 .laser-pulse {
-  animation: laserPulse 1.2s infinite;
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

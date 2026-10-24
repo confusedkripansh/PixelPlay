@@ -190,10 +190,10 @@ const Canvas = forwardRef(({
         justifyContent: 'space-between', 
         alignItems: 'center',
         padding: '0.6rem 1rem',
-        background: 'rgba(15, 20, 28, 0.85)',
-        border: '1px solid rgba(0, 240, 255, 0.25)',
+        background: 'rgba(15, 20, 28, 0.95)',
+        border: isMyTurn ? '1px solid #ffd000' : '1px solid rgba(255, 255, 255, 0.1)',
         borderRadius: '8px',
-        boxShadow: '0 0 15px rgba(0, 240, 255, 0.08)'
+        boxShadow: isMyTurn ? '0 0 15px rgba(255, 208, 0, 0.15)' : 'none'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ 
@@ -201,33 +201,36 @@ const Canvas = forwardRef(({
             textTransform: 'uppercase', 
             letterSpacing: '1px', 
             fontWeight: 800,
-            color: isMyTurn ? '#00ff88' : '#64748b'
+            color: isMyTurn ? '#ffd000' : '#94a3b8'
           }}>
-            {isMyTurn ? '● LIVE DRAWING' : '○ SPECTATING'}
+            {isMyTurn ? '● LIVE DRAWING TURN' : '○ SPECTATING CANVAS'}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94a3b8' }}>
-            INK: <span style={{ color: inkPercentage > 20 ? '#00f0ff' : '#ff3366' }}>{inkPercentage}%</span>
-          </span>
-          <div style={{ 
-            width: '120px', 
-            height: '8px', 
-            background: 'rgba(255,255,255,0.08)', 
-            borderRadius: '4px', 
-            overflow: 'hidden',
-            border: '1px solid rgba(255,255,255,0.1)'
-          }}>
+        {/* Ink Meter: ONLY visible for the active drawer! Never for judges or spectators */}
+        {isMyTurn && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#94a3b8' }}>
+              INK: <span style={{ color: inkPercentage > 20 ? '#ffd000' : '#ff3366' }}>{inkPercentage}%</span>
+            </span>
             <div style={{ 
-              width: `${inkPercentage}%`, 
-              height: '100%', 
-              background: inkPercentage > 20 ? 'linear-gradient(90deg, #00d2ff, #00f0ff)' : '#ff3366',
-              boxShadow: inkPercentage > 20 ? '0 0 8px rgba(0, 240, 255, 0.6)' : '0 0 8px rgba(255, 51, 102, 0.8)',
-              transition: 'width 0.1s linear' 
-            }} />
+              width: '120px', 
+              height: '8px', 
+              background: 'rgba(255,255,255,0.08)', 
+              borderRadius: '4px', 
+              overflow: 'hidden',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}>
+              <div style={{ 
+                width: `${inkPercentage}%`, 
+                height: '100%', 
+                background: inkPercentage > 20 ? '#ffd000' : '#ff3366',
+                boxShadow: inkPercentage > 20 ? '0 0 8px rgba(255, 208, 0, 0.7)' : '0 0 8px rgba(255, 51, 102, 0.8)',
+                transition: 'width 0.1s linear' 
+              }} />
+            </div>
           </div>
-        </div>
+        )}
       </div>
       
       {/* Palette Bar */}
@@ -237,10 +240,10 @@ const Canvas = forwardRef(({
           gap: '0.5rem', 
           alignItems: 'center', 
           justifyContent: 'center',
-          background: 'rgba(15, 20, 28, 0.6)',
+          background: 'rgba(15, 20, 28, 0.8)',
           padding: '0.4rem 0.8rem',
           borderRadius: '8px',
-          border: '1px solid rgba(255,255,255,0.06)'
+          border: '1px solid rgba(255, 208, 0, 0.2)'
         }}>
           {colorPresets.map((p) => (
             <button
@@ -253,8 +256,8 @@ const Canvas = forwardRef(({
                 height: '24px',
                 borderRadius: '50%',
                 background: p.color,
-                border: activeColor === p.color ? '2px solid #00f0ff' : '1px solid rgba(255,255,255,0.2)',
-                boxShadow: activeColor === p.color ? '0 0 8px #00f0ff' : 'none',
+                border: activeColor === p.color ? '2px solid #ffd000' : '1px solid rgba(255,255,255,0.2)',
+                boxShadow: activeColor === p.color ? '0 0 8px #ffd000' : 'none',
                 cursor: 'pointer',
                 transform: activeColor === p.color ? 'scale(1.2)' : 'scale(1)',
                 transition: 'transform 0.15s ease'
@@ -298,8 +301,8 @@ const Canvas = forwardRef(({
           cursor: isMyTurn && inkUsed < pixelsPerTurn ? 'crosshair' : 'not-allowed',
           backgroundColor: '#ffffff',
           borderRadius: '10px',
-          border: isMyTurn ? '2px solid rgba(0, 240, 255, 0.6)' : '2px solid rgba(255, 255, 255, 0.12)',
-          boxShadow: isMyTurn ? '0 0 25px rgba(0, 240, 255, 0.2)' : '0 8px 30px rgba(0,0,0,0.5)',
+          border: isMyTurn ? '2px solid #ffd000' : '2px solid rgba(255, 255, 255, 0.12)',
+          boxShadow: isMyTurn ? '0 0 25px rgba(255, 208, 0, 0.25)' : '0 8px 30px rgba(0,0,0,0.5)',
           touchAction: 'none'
         }}
       />

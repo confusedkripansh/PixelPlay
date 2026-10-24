@@ -23,19 +23,23 @@ type Stroke struct {
 }
 
 type GameState struct {
-	Status         string         `json:"status"` // "lobby", "playing", "judging", "finished"
-	CurrentRound   int            `json:"currentRound"`
-	MaxRounds      int            `json:"maxRounds"`
-	ActiveTeam     string         `json:"activeTeam"` // "teamA" or "teamB"
-	ActivePlayerID string         `json:"activePlayerId"`
-	CurrentWord    string         `json:"currentWord,omitempty"`
-	AdminID        string         `json:"adminId"`
-	TeamA          []PlayerInfo   `json:"teamA"`
-	TeamB          []PlayerInfo   `json:"teamB"`
-	Judges         []PlayerInfo   `json:"judges"`
-	Scores         map[string]int `json:"scores"`
-	UsedWords      []string       `json:"usedWords,omitempty"`
-	Settings       RoomSettings   `json:"settings"`
+	Status           string         `json:"status"` // "lobby", "playing", "judging", "finished"
+	CurrentRound     int            `json:"currentRound"`
+	MaxRounds        int            `json:"maxRounds"`
+	ActiveTeam       string         `json:"activeTeam"` // "teamA" or "teamB"
+	ActivePlayerID   string         `json:"activePlayerId"`
+	ActiveTeamStep   int            `json:"activeTeamStep"`
+	TotalTeamSteps   int            `json:"totalTeamSteps"`
+	CurrentWord      string         `json:"currentWord,omitempty"`
+	AdminID          string         `json:"adminId"`
+	TeamA            []PlayerInfo   `json:"teamA"`
+	TeamB            []PlayerInfo   `json:"teamB"`
+	Judges           []PlayerInfo   `json:"judges"`
+	Scores           map[string]int `json:"scores"`
+	UsedWords        []string       `json:"usedWords,omitempty"`
+	Settings         RoomSettings   `json:"settings"`
+	JudgeSubmissions map[string]int `json:"judgeSubmissions,omitempty"`
+	LastMeanScore    int            `json:"lastMeanScore,omitempty"`
 }
 
 type Room struct {

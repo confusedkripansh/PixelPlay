@@ -150,5 +150,10 @@ func (h *AuthHandler) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success"})
+	updatedUser, _ := h.userService.GetUserProfile(context.Background(), googleId)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"user":   updatedUser,
+	})
 }

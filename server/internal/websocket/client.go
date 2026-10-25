@@ -5,12 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pixel1000/server/internal/models"
 	"github.com/pixel1000/server/internal/platform/words"
 )
+
+// getDeterministicTeamPlayers gathers unique players on a team in a deterministic, sorted order so turns are never skipped.
+func getDeterministicTeamPlayers(clients map[*Client]bool, role string) []string {
+	seen := make(map[string]bool)
+	var list []string
+	for c := range clients {
+		if c.Role == role && c.UserID != "" && !seen[c.UserID] {
+			seen[c.UserID] = true
+			list = append(list, c.UserID)
+		}
+	}
+	sort.Strings(list)
+	return list
+}
 
 const (
 	// Time allowed to write a message to the peer.
@@ -242,17 +257,13 @@ func (c *Client) ReadPump() {
 				}(c.Room.ID)
 			}
 			
-			// Round robin setup for Team Alpha collective drawing
-			var teamAMembers []string
-			for client := range c.Room.Clients {
-				if client.Role == "teamA" {
-					teamAMembers = append(teamAMembers, client.UserID)
-				}
-			}
-			c.Room.State.TotalTeamSteps = len(teamAMembers)
+			// Deterministic team setup: sorted and deduplicated so no player is ever skipped
+			teamAOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamA")
+			c.Room.State.TeamAOrder = teamAOrder
+			c.Room.State.TotalTeamSteps = len(teamAOrder)
 			c.Room.State.ActiveTeamStep = 0
-			if len(teamAMembers) > 0 {
-				c.Room.State.ActivePlayerID = teamAMembers[0]
+			if len(teamAOrder) > 0 {
+				c.Room.State.ActivePlayerID = teamAOrder[0]
 			} else {
 				c.Room.State.ActivePlayerID = ""
 			}
@@ -272,23 +283,37 @@ func (c *Client) ReadPump() {
 			c.Room.mu.Lock()
 			// STRICT PERMISSION: Only the active drawer can finish their turn/step early! Host cannot force early finish.
 			if c.Room.State.Status == "playing" && c.UserID == c.Room.State.ActivePlayerID {
-				var activeTeamMembers []string
-				for client := range c.Room.Clients {
-					if client.Role == c.Room.State.ActiveTeam {
-						activeTeamMembers = append(activeTeamMembers, client.UserID)
+				var activeTeamOrder []string
+				if c.Room.State.ActiveTeam == "teamA" {
+					if len(c.Room.State.TeamAOrder) == 0 {
+						c.Room.State.TeamAOrder = getDeterministicTeamPlayers(c.Room.Clients, "teamA")
 					}
+					activeTeamOrder = c.Room.State.TeamAOrder
+				} else {
+					if len(c.Room.State.TeamBOrder) == 0 {
+						c.Room.State.TeamBOrder = getDeterministicTeamPlayers(c.Room.Clients, "teamB")
+					}
+					activeTeamOrder = c.Room.State.TeamBOrder
 				}
 
-				c.Room.State.TotalTeamSteps = len(activeTeamMembers)
+				c.Room.State.TotalTeamSteps = len(activeTeamOrder)
 				c.Room.State.ActiveTeamStep++
 
-				if c.Room.State.ActiveTeamStep < c.Room.State.TotalTeamSteps && len(activeTeamMembers) > c.Room.State.ActiveTeamStep {
-					// Rotate to the next teammate to continue the single collective drawing! Canvas is preserved.
-					c.Room.State.ActivePlayerID = activeTeamMembers[c.Room.State.ActiveTeamStep]
+				if c.Room.State.ActiveTeamStep < len(activeTeamOrder) {
+					// Advance to the next player in deterministic order! Canvas is preserved.
+					c.Room.State.ActivePlayerID = activeTeamOrder[c.Room.State.ActiveTeamStep]
 				} else {
-					// All players on the team have completed their drawing step for this word -> judging!
+					// All players on the team have completed their drawing step for this word -> transition to judging!
 					c.Room.State.Status = "judging"
 					c.Room.State.JudgeSubmissions = make(map[string]int)
+
+					// Broadcast stroke_sync to all clients so judges immediately have 100% of the completed drawing!
+					strokesBytes, _ := json.Marshal(c.Room.Strokes)
+					syncMsg, _ := json.Marshal(map[string]interface{}{
+						"type":    "stroke_sync",
+						"payload": json.RawMessage(strokesBytes),
+					})
+					c.Room.Broadcast <- syncMsg
 				}
 			}
 			c.Room.mu.Unlock()
@@ -308,13 +333,14 @@ func (c *Client) ReadPump() {
 						c.Room.State.JudgeSubmissions[c.UserID] = scorePayload.Score
 					}
 
-					// Count total connected judges in the match
-					totalJudgesCount := 0
+					// Count unique connected judges (atomic, deduplicated by UserID)
+					uniqueJudges := make(map[string]bool)
 					for client := range c.Room.Clients {
-						if client.Role == "judge" {
-							totalJudgesCount++
+						if client.Role == "judge" && client.UserID != "" {
+							uniqueJudges[client.UserID] = true
 						}
 					}
+					totalJudgesCount := len(uniqueJudges)
 
 					// When all judges have submitted their rating, compute the mean score and advance
 					if len(c.Room.State.JudgeSubmissions) >= totalJudgesCount && totalJudgesCount > 0 {
@@ -337,21 +363,17 @@ func (c *Client) ReadPump() {
 						}
 
 						if c.Room.State.ActiveTeam == "teamA" {
-							// Team Alpha finished their collective drawing. Now Team Beta draws Word 2 collectively!
+							// Team Alpha finished. Now Team Beta draws Word 2!
 							c.Room.State.ActiveTeam = "teamB"
 							c.Room.State.Status = "playing"
 							c.Room.State.JudgeSubmissions = make(map[string]int)
 
-							var teamBMembers []string
-							for client := range c.Room.Clients {
-								if client.Role == "teamB" {
-									teamBMembers = append(teamBMembers, client.UserID)
-								}
-							}
-							c.Room.State.TotalTeamSteps = len(teamBMembers)
+							teamBOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamB")
+							c.Room.State.TeamBOrder = teamBOrder
+							c.Room.State.TotalTeamSteps = len(teamBOrder)
 							c.Room.State.ActiveTeamStep = 0
-							if len(teamBMembers) > 0 {
-								c.Room.State.ActivePlayerID = teamBMembers[0]
+							if len(teamBOrder) > 0 {
+								c.Room.State.ActivePlayerID = teamBOrder[0]
 							} else {
 								c.Room.State.ActivePlayerID = ""
 							}
@@ -373,16 +395,12 @@ func (c *Client) ReadPump() {
 								c.Room.State.Status = "playing"
 								c.Room.State.JudgeSubmissions = make(map[string]int)
 
-								var teamAMembers []string
-								for client := range c.Room.Clients {
-									if client.Role == "teamA" {
-										teamAMembers = append(teamAMembers, client.UserID)
-									}
-								}
-								c.Room.State.TotalTeamSteps = len(teamAMembers)
+								teamAOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamA")
+								c.Room.State.TeamAOrder = teamAOrder
+								c.Room.State.TotalTeamSteps = len(teamAOrder)
 								c.Room.State.ActiveTeamStep = 0
-								if len(teamAMembers) > 0 {
-									c.Room.State.ActivePlayerID = teamAMembers[0]
+								if len(teamAOrder) > 0 {
+									c.Room.State.ActivePlayerID = teamAOrder[0]
 								} else {
 									c.Room.State.ActivePlayerID = ""
 								}
@@ -399,11 +417,14 @@ func (c *Client) ReadPump() {
 						clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
 						c.Room.Broadcast <- clearCanvasMsg
 						go c.Room.BroadcastState()
-						return
+						// CRITICAL FIX: No return here! Loop continues reading websocket messages!
+					} else {
+						c.Room.mu.Unlock()
+						go c.Room.BroadcastState()
 					}
+				} else {
+					c.Room.mu.Unlock()
 				}
-				c.Room.mu.Unlock()
-				go c.Room.BroadcastState()
 			}
 		} else {
 			// If it's a generic chat message, just broadcast it to everyone.

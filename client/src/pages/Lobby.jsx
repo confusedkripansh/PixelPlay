@@ -11,8 +11,7 @@ import {
   IconUsers, 
   IconTimer,
   IconZap,
-  IconCheck,
-  IconSparkles
+  IconCheck
 } from '../components/Icons';
 import { API_BASE_URL } from '../config';
 
@@ -27,14 +26,14 @@ const Lobby = () => {
   const [user, setUser] = useState(() => {
     return JSON.parse(localStorage.getItem('pixel_user')) || { 
       googleId: 'guest-' + Math.floor(100000 + Math.random() * 900000),
-      name: 'Guest Pilot', 
+      name: 'Guest Player', 
       avatarUrl: '',
       stats: { wins: 0, losses: 0, experience: 0, totalPoints: 0 }
     };
   });
   
   const [isEditingName, setIsEditingName] = useState(false);
-  const [newName, setNewName] = useState(user.name || 'Guest Pilot');
+  const [newName, setNewName] = useState(user.name || 'Guest Player');
   const [isSavingName, setIsSavingName] = useState(false);
   
   const navigate = useNavigate();
@@ -101,64 +100,68 @@ const Lobby = () => {
   const playerLevel = Math.floor(((user.stats?.experience || user.stats?.Experience) || 0) / 100) + 1;
 
   return (
-    <div className="app-container" style={{ alignItems: 'center', paddingTop: '4vh' }}>
-      {/* Top Esports Bar (Cloudflight Coding Contest Aesthetic) */}
-      <header className="glass-panel" style={{ 
+    <div className="app-container" style={{ alignItems: 'center', paddingTop: '3vh', maxWidth: '980px' }}>
+      
+      {/* Skribbl.io / SmashKarts.io Header Bar */}
+      <header className="io-card" style={{ 
         width: '100%', 
-        maxWidth: '880px', 
-        marginBottom: '2rem', 
-        padding: '0.85rem 1.5rem',
+        marginBottom: '1.5rem', 
+        padding: '0.85rem 1.25rem',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        borderLeft: '4px solid #ffd000'
+        background: '#1b2a47',
+        border: '3px solid #090e18',
+        boxShadow: '0 6px 0 #070c14'
       }}>
+        {/* Game Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '8px',
-            background: 'rgba(255, 208, 0, 0.15)',
-            border: '1px solid #ffd000',
+            width: '42px',
+            height: '42px',
+            borderRadius: '12px',
+            background: '#feca57',
+            border: '2px solid #090e18',
+            boxShadow: '0 3px 0 #ff9f43',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 0 12px rgba(255, 208, 0, 0.3)'
+            justifyContent: 'center'
           }}>
-            <IconSwords size={22} color="#ffd000" />
+            <IconSwords size={24} color="#222f3e" />
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: '1.4rem', letterSpacing: '0.5px' }}>
-              PIXEL<span style={{ color: '#ffd000' }}>PLAY</span>
+            <h1 style={{ margin: 0, fontSize: '1.6rem', color: '#ffffff', letterSpacing: '0.5px' }}>
+              PIXEL<span style={{ color: '#feca57' }}>PLAY.IO</span>
             </h1>
-            <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 800 }}>
-              COMPETITIVE DRAWING CONTEST
+            <div style={{ fontSize: '0.7rem', color: '#c8d6e5', fontWeight: 800 }}>
+              MULTIPLAYER DRAWING BATTLE
             </div>
           </div>
         </div>
 
+        {/* User Card with Inline Name Editor */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
           {isEditingName ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#111319', padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ffd000' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#24375d', padding: '0.35rem 0.65rem', borderRadius: '10px', border: '2px solid #feca57' }}>
               <input 
                 type="text" 
                 value={newName} 
                 onChange={(e) => setNewName(e.target.value)}
-                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.85rem', fontWeight: 800, width: '120px', outline: 'none' }}
+                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.9rem', fontWeight: 800, width: '130px', outline: 'none' }}
                 autoFocus
               />
               <button 
                 className="btn btn-primary" 
                 onClick={handleSaveUsername} 
                 disabled={isSavingName}
-                style={{ padding: '0.25rem 0.6rem', fontSize: '0.7rem' }}
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
               >
                 Save
               </button>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => { setNewName(user.name); setIsEditingName(false); }}
-                style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
               >
                 ✕
               </button>
@@ -170,59 +173,54 @@ const Lobby = () => {
                 alignItems: 'center', 
                 gap: '0.65rem', 
                 padding: '0.35rem 0.75rem', 
-                background: '#111319', 
-                border: '1px solid rgba(255,255,255,0.1)', 
-                borderRadius: '6px',
+                background: '#24375d', 
+                border: '2px solid #090e18', 
+                borderRadius: '10px',
+                boxShadow: '0 3px 0 #070c14',
                 cursor: 'pointer'
               }}
               onClick={() => setIsEditingName(true)}
-              title="Click to edit username"
+              title="Click to edit your nickname"
             >
-              <PilotAvatar src={user.avatarUrl} name={user.name} size={32} border="#ffd000" />
+              <PilotAvatar src={user.avatarUrl} name={user.name} size={34} border="#feca57" />
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#f8fafc' }}>
-                  {user.name} <span style={{ fontSize: '0.65rem', color: '#ffd000' }}>✎</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 900, color: '#feca57' }}>
+                  {user.name} ✎
                 </span>
-                <span style={{ fontSize: '0.7rem', color: '#ffd000', fontWeight: 700 }}>TIER {playerLevel}</span>
+                <span style={{ fontSize: '0.7rem', color: '#1dd1a1', fontWeight: 800 }}>LVL {playerLevel}</span>
               </div>
             </div>
           )}
 
-          <button className="btn btn-secondary" onClick={() => navigate('/dashboard')} style={{ padding: '0.5rem 0.9rem', fontSize: '0.8rem' }}>
-            <IconDashboard size={15} />
-            <span>Career</span>
+          <button className="btn btn-secondary" onClick={() => navigate('/dashboard')} style={{ padding: '0.55rem 0.95rem' }}>
+            <IconDashboard size={16} />
+            <span>Profile</span>
           </button>
           
           <button 
-            className="btn btn-secondary" 
+            className="btn btn-danger" 
             onClick={handleLogout}
-            style={{ 
-              padding: '0.5rem 0.9rem', 
-              fontSize: '0.8rem',
-              color: '#ff3366', 
-              borderColor: 'rgba(255, 51, 102, 0.4)', 
-              background: 'rgba(255, 51, 102, 0.1)' 
-            }}
+            style={{ padding: '0.55rem 0.95rem' }}
           >
-            <IconLogout size={15} color="#ff3366" />
-            <span>Exit</span>
+            <IconLogout size={16} color="#fff" />
+            <span>Logout</span>
           </button>
         </div>
       </header>
 
-      {/* Main Join & Create Cards */}
-      <div style={{ display: 'flex', gap: '1.5rem', width: '100%', maxWidth: '880px' }}>
+      {/* Main Join & Create Cards (Skribbl 3D Push Card Layout) */}
+      <div style={{ display: 'flex', gap: '1.25rem', width: '100%', marginBottom: '1.5rem' }}>
         
-        {/* Join Card */}
-        <div className="glass-panel" style={{ flex: 1, padding: '1.75rem', borderTop: '3px solid #ffd000' }}>
+        {/* Join Room Card */}
+        <div className="io-card" style={{ flex: 1, padding: '1.5rem', borderTop: '6px solid #10ac84' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-            <IconZap size={20} color="#ffd000" />
-            <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#ffd000', letterSpacing: '0.5px' }}>CONNECT TO ARENA</h2>
+            <IconZap size={22} color="#1dd1a1" />
+            <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#1dd1a1' }}>JOIN MATCH</h2>
           </div>
 
-          <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+          <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div>
-              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 800 }}>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem', color: '#c8d6e5', fontWeight: 800 }}>
                 ROOM CODE
               </label>
               <input 
@@ -231,22 +229,24 @@ const Lobby = () => {
                 onChange={(e) => setRoomId(e.target.value)}
                 style={{ 
                   width: '100%', 
-                  padding: '0.7rem', 
-                  borderRadius: '6px', 
-                  border: '1px solid rgba(255, 208, 0, 0.4)', 
-                  background: '#111319', 
-                  color: 'white',
-                  fontWeight: 800,
-                  letterSpacing: '1.5px',
-                  textTransform: 'uppercase'
+                  padding: '0.75rem', 
+                  borderRadius: '10px', 
+                  border: '2px solid #090e18', 
+                  background: '#24375d', 
+                  color: '#ffffff',
+                  fontWeight: 900,
+                  fontSize: '1rem',
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase',
+                  outline: 'none'
                 }}
-                placeholder="ENTER 6-DIGIT CODE"
+                placeholder="E.G. ABC123"
               />
             </div>
 
             <div>
-              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 800 }}>
-                PASSWORD (IF LOCKED)
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem', color: '#c8d6e5', fontWeight: 800 }}>
+                PASSWORD (IF PRIVATE)
               </label>
               <input 
                 type="password" 
@@ -254,36 +254,37 @@ const Lobby = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 style={{ 
                   width: '100%', 
-                  padding: '0.7rem', 
-                  borderRadius: '6px', 
-                  border: '1px solid rgba(255, 255, 255, 0.1)', 
-                  background: '#111319', 
-                  color: 'white' 
+                  padding: '0.75rem', 
+                  borderRadius: '10px', 
+                  border: '2px solid #090e18', 
+                  background: '#24375d', 
+                  color: '#ffffff',
+                  outline: 'none'
                 }}
-                placeholder="Leave empty for open rooms"
+                placeholder="Leave blank for public room"
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ marginTop: '0.4rem', width: '100%' }}>
-              <IconSwords size={16} />
-              Deploy to Match
+            <button type="submit" className="btn btn-primary" style={{ marginTop: '0.4rem', width: '100%', padding: '0.85rem' }}>
+              <IconSwords size={18} />
+              JOIN MATCH NOW
             </button>
           </form>
         </div>
 
-        {/* Create Card */}
-        <div className="glass-panel" style={{ flex: 1, padding: '1.75rem', borderTop: '3px solid #ff3366', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <IconGlobe size={20} color="#ff3366" />
-            <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#ff3366', letterSpacing: '0.5px' }}>HOST NEW ARENA</h2>
+        {/* Create Room Card */}
+        <div className="io-card" style={{ flex: 1, padding: '1.5rem', borderTop: '6px solid #ee5253', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+            <IconGlobe size={22} color="#ee5253" />
+            <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#ee5253' }}>CREATE ROOM</h2>
           </div>
-          <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '1rem', lineHeight: '1.4' }}>
-            Deploy a contest arena. As Host, you set round-robin turn timers, rounds, and match start authorization.
+          <p style={{ color: '#c8d6e5', fontSize: '0.85rem', marginBottom: '0.9rem' }}>
+            Host your own match with custom turn times, team drawing, and words!
           </p>
 
-          <div style={{ width: '100%', marginBottom: '1rem', textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 800 }}>
-              ARENA PASSWORD (OPTIONAL)
+          <div style={{ width: '100%', marginBottom: '1rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem', color: '#c8d6e5', fontWeight: 800 }}>
+              ROOM PASSWORD (OPTIONAL)
             </label>
             <input 
               type="password" 
@@ -291,115 +292,113 @@ const Lobby = () => {
               onChange={(e) => setCreatePassword(e.target.value)}
               style={{ 
                 width: '100%', 
-                padding: '0.7rem', 
-                borderRadius: '6px', 
-                border: '1px solid rgba(255, 255, 255, 0.1)', 
-                background: '#111319', 
-                color: 'white' 
+                padding: '0.75rem', 
+                borderRadius: '10px', 
+                border: '2px solid #090e18', 
+                background: '#24375d', 
+                color: '#ffffff',
+                outline: 'none'
               }}
-              placeholder="Leave blank for public feed"
+              placeholder="Leave blank for public room"
             />
             {createPassword.trim() === '' ? (
-              <div style={{ marginTop: '0.65rem', padding: '0.6rem 0.75rem', background: 'rgba(255, 208, 0, 0.1)', border: '1px solid rgba(255, 208, 0, 0.35)', borderRadius: '6px', color: '#ffd000', fontSize: '0.75rem', lineHeight: '1.3', display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
-                <IconGlobe size={15} color="#ffd000" style={{ marginTop: '2px', flexShrink: 0 }} />
-                <span><strong>Public Match:</strong> No password given! This room will broadcast live to the Global Feed below so anyone can join.</span>
+              <div style={{ marginTop: '0.6rem', padding: '0.55rem 0.75rem', background: 'rgba(16, 172, 132, 0.15)', border: '2px solid #10ac84', borderRadius: '10px', color: '#1dd1a1', fontSize: '0.75rem', fontWeight: 800 }}>
+                🌐 Public Room: Anyone from the global list below can join!
               </div>
             ) : (
-              <div style={{ marginTop: '0.65rem', padding: '0.6rem 0.75rem', background: 'rgba(0, 240, 255, 0.08)', border: '1px solid rgba(0, 240, 255, 0.25)', borderRadius: '6px', color: '#00f0ff', fontSize: '0.75rem', lineHeight: '1.3', display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
-                <IconLock size={15} color="#00f0ff" style={{ marginTop: '2px', flexShrink: 0 }} />
-                <span><strong>Private Match:</strong> Locked with password. Only players with this key can connect.</span>
+              <div style={{ marginTop: '0.6rem', padding: '0.55rem 0.75rem', background: 'rgba(238, 82, 83, 0.15)', border: '2px solid #ee5253', borderRadius: '10px', color: '#ff6b6b', fontSize: '0.75rem', fontWeight: 800 }}>
+                🔒 Private Room: Only friends with this password can enter.
               </div>
             )}
           </div>
 
-          <button onClick={handleCreate} className="btn btn-hot" style={{ width: '100%', marginTop: 'auto' }}>
-            <IconZap size={16} />
-            Initialize Arena Match
+          <button onClick={handleCreate} className="btn btn-gold" style={{ width: '100%', marginTop: 'auto', padding: '0.85rem' }}>
+            <IconZap size={18} />
+            CREATE NEW ROOM
           </button>
         </div>
       </div>
 
-      {/* Global Public Room Feed */}
-      <div className="glass-panel" style={{ width: '100%', maxWidth: '880px', marginTop: '2rem', padding: '1.5rem', marginBottom: '3rem', borderLeft: '4px solid #ffd000' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <IconGlobe size={20} color="#ffd000" />
-            <h2 style={{ margin: 0, fontSize: '1.15rem', letterSpacing: '0.5px' }}>GLOBAL ARENA DISCOVERY</h2>
-            <span className="badge-live">LIVE FEED</span>
+      {/* Public Rooms Feed */}
+      <div className="io-card" style={{ width: '100%', padding: '1.25rem', marginBottom: '2.5rem', borderTop: '6px solid #feca57' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <IconGlobe size={20} color="#feca57" />
+            <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#feca57' }}>PUBLIC ROOMS</h2>
+            <span className="badge-live">LIVE</span>
           </div>
 
           <button 
             className="btn btn-secondary" 
             onClick={fetchPublicRooms}
             disabled={isLoadingFeed}
-            style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+            style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
           >
-            <IconRefresh size={13} />
+            <IconRefresh size={14} />
             <span>{isLoadingFeed ? 'Scanning...' : 'Refresh'}</span>
           </button>
         </div>
 
         {publicRooms.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '2.5rem 1rem', background: '#111319', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.08)' }}>
-            <p style={{ color: '#94a3b8', margin: 0, fontSize: '0.85rem' }}>
-              No public arenas broadcasting right now.
+          <div style={{ textAlign: 'center', padding: '2rem 1rem', background: '#24375d', borderRadius: '12px', border: '2px dashed #090e18' }}>
+            <p style={{ color: '#c8d6e5', margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>
+              No public rooms right now!
             </p>
-            <p style={{ color: '#64748b', fontSize: '0.75rem', marginTop: '0.3rem' }}>
-              Create an arena above without a password to feature your match live on this broadcast list!
+            <p style={{ color: '#8395a7', fontSize: '0.8rem', marginTop: '0.3rem' }}>
+              Create a room above with no password to appear on this public feed!
             </p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem' }}>
             {publicRooms.map((r) => (
               <div 
                 key={r.roomId}
-                className="glass-panel"
                 style={{ 
-                  padding: '1rem', 
-                  borderRadius: '8px', 
-                  background: '#111319',
+                  padding: '0.85rem', 
+                  borderRadius: '12px', 
+                  background: '#24375d',
+                  border: '2px solid #090e18',
+                  boxShadow: '0 4px 0 #070c14',
                   display: 'flex', 
                   flexDirection: 'column', 
-                  gap: '0.75rem',
-                  border: '1px solid rgba(255, 208, 0, 0.25)'
+                  gap: '0.6rem'
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 800, fontSize: '1rem', color: '#ffd000', letterSpacing: '0.5px' }}>
+                  <span style={{ fontWeight: 900, fontSize: '1.05rem', color: '#feca57' }}>
                     ROOM #{r.roomId}
                   </span>
-                  <span className="badge-tag" style={{ 
-                    background: r.status === 'lobby' ? '#ffd000' : 'rgba(255, 255, 255, 0.1)',
-                    color: r.status === 'lobby' ? '#000' : '#fff'
+                  <span style={{ 
+                    fontSize: '0.7rem', 
+                    fontWeight: 900, 
+                    padding: '0.2rem 0.5rem', 
+                    borderRadius: '6px',
+                    background: r.status === 'lobby' ? '#10ac84' : '#ee5253',
+                    color: '#ffffff'
                   }}>
                     {r.status.toUpperCase()}
                   </span>
                 </div>
 
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <IconUsers size={14} color="#64748b" />
-                    <span>Pilots: <strong style={{ color: '#f8fafc' }}>{r.playerCount}</strong></span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <IconTimer size={14} color="#64748b" />
-                    <span>Rules: {r.timeLimit || 60}s | {r.inkLimit || 1000}px</span>
-                  </div>
+                <div style={{ fontSize: '0.8rem', color: '#c8d6e5', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Players: <strong style={{ color: '#fff' }}>{r.playerCount}</strong></span>
+                  <span>Turn: <strong style={{ color: '#feca57' }}>{r.timeLimit || 60}s</strong></span>
                 </div>
 
                 <button 
                   className="btn btn-primary"
                   onClick={() => navigate(`/room/${r.roomId}`)}
-                  style={{ width: '100%', padding: '0.55rem', fontSize: '0.75rem', marginTop: 'auto' }}
+                  style={{ width: '100%', padding: '0.5rem', fontSize: '0.8rem', marginTop: '0.2rem' }}
                 >
                   <IconZap size={14} />
-                  Join Match
+                  PLAY
                 </button>
               </div>
             ))}
           </div>
         )}
       </div>
+
     </div>
   );
 };

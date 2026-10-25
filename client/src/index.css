@@ -1,209 +1,231 @@
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&family=Nunito:wght@700;800;900&display=swap');
 
 :root {
-  /* Competitive Contest Theme (Inspired by Cloudflight Coding Contest) */
-  --bg-primary: #0a0b0e;
-  --bg-secondary: #111319;
-  --bg-tertiary: #171b24;
-  --bg-surface: #1e2330;
+  /* Skribbl.io & SmashKarts.io Arcade Color Palette */
+  --bg-game: #0e1726;
+  --bg-panel: #1b2a47;
+  --bg-card: #24375d;
+  --bg-card-hover: #2c426f;
   
-  /* Primary Contest Gold & Neon Accents */
-  --accent-gold: #ffd000;       /* Signature Contest Canary Yellow */
-  --accent-primary: #ffd000;    /* Primary Brand Highlight */
-  --accent-cyan: #00f0ff;       /* Team Alpha Blue */
-  --accent-coral: #ff3366;      /* Team Beta Red */
-  --accent-secondary: #00f0ff;
-  --accent-emerald: #10b981;    /* Verified Success Green */
-  --accent-danger: #ff3366;
-
-  --team-a: #00f0ff;
-  --team-b: #ff3366;
-  --team-judge: #ffd000;
-
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --color-team-a: #2e86de;       /* Team Blue */
+  --color-team-b: #ee5253;       /* Team Red */
+  --color-judge: #feca57;        /* Referee Gold */
+  --color-green: #10ac84;        /* Drawing Action Green */
+  --color-purple: #5f27cd;
   
-  /* Precision Contest Cards */
-  --card-bg: rgba(17, 19, 25, 0.9);
-  --card-border: rgba(255, 255, 255, 0.08);
-  --card-border-gold: rgba(255, 208, 0, 0.35);
-  --card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.9);
+  --border-thick: 3px solid #090e18;
+  --border-card: 2px solid #0c1422;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
 
-  /* Typography */
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-display: 'Outfit', 'Chakra Petch', system-ui, sans-serif;
-  --font-gaming: 'Chakra Petch', monospace, sans-serif;
+  --font-main: 'Fredoka', 'Nunito', -apple-system, sans-serif;
+  --font-chunky: 'Fredoka', sans-serif;
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  user-select: none;
 }
 
 body {
-  font-family: var(--font-sans);
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
+  font-family: var(--font-main);
+  background-color: var(--bg-game);
+  color: #ffffff;
   min-height: 100vh;
   overflow-x: hidden;
+  /* Playful .io polka dot arcade pattern */
   background-image: 
-    radial-gradient(circle at 15% 15%, rgba(255, 208, 0, 0.04), transparent 40%),
-    radial-gradient(circle at 85% 85%, rgba(0, 240, 255, 0.04), transparent 40%),
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
+    radial-gradient(circle, rgba(255, 255, 255, 0.06) 2px, transparent 2px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.03) 2px, transparent 2px);
+  background-size: 32px 32px, 16px 16px;
+  background-position: 0 0, 16px 16px;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-display);
-  letter-spacing: -0.5px;
+  font-family: var(--font-chunky);
+  font-weight: 800;
+  letter-spacing: 0.5px;
 }
 
-/* Competitive Card Panel */
-.glass-panel {
-  background: var(--card-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  box-shadow: var(--card-shadow);
+/* Skribbl / SmashKarts 3D Cartoon Cards */
+.glass-panel, .io-card {
+  background: var(--bg-panel);
+  border: var(--border-thick);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 0 #070c14;
   position: relative;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.glass-panel:hover {
-  border-color: rgba(255, 208, 0, 0.3);
-}
-
-/* High Voltage Contest Buttons (Cloudflight Style) */
+/* Skribbl 3D Pushable Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.7rem 1.4rem;
-  border-radius: 6px;
+  padding: 0.75rem 1.4rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-chunky);
   font-weight: 800;
-  font-family: var(--font-display);
+  font-size: 0.95rem;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  border: none;
+  transition: all 0.1s ease;
+  border: 2px solid #090e18;
   outline: none;
 }
 
-.btn:active {
-  transform: scale(0.98);
-}
-
-/* Primary Canary Yellow Button with Bold Jet-Black Text */
+/* Primary Green 3D Push Button (Skribbl Play / Confirm) */
 .btn-primary {
-  background: #ffd000;
-  color: #000000;
-  font-weight: 900;
-  box-shadow: 0 4px 16px rgba(255, 208, 0, 0.3);
+  background: #10ac84;
+  color: #ffffff;
+  box-shadow: 0 5px 0 #0b6850;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .btn-primary:hover {
-  background: #ffe033;
+  background: #1dd1a1;
   transform: translateY(-2px);
-  box-shadow: 0 6px 22px rgba(255, 208, 0, 0.5);
+  box-shadow: 0 7px 0 #0b6850;
+}
+
+.btn-primary:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #0b6850;
 }
 
 .btn-primary:disabled {
-  background: rgba(255, 208, 0, 0.25);
-  color: rgba(0, 0, 0, 0.5);
-  box-shadow: none;
+  background: #576574;
+  box-shadow: 0 4px 0 #222f3e;
+  color: #c8d6e5;
   cursor: not-allowed;
   transform: none;
 }
 
-/* Dark Secondary Action Button */
+/* Yellow / Gold 3D Action Button */
+.btn-gold {
+  background: #feca57;
+  color: #222f3e;
+  box-shadow: 0 5px 0 #ff9f43;
+}
+
+.btn-gold:hover {
+  background: #ffdd59;
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #ff9f43;
+}
+
+.btn-gold:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #ff9f43;
+}
+
+/* Secondary Slate 3D Button */
 .btn-secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #34495e;
+  color: #ecf0f1;
+  box-shadow: 0 5px 0 #1e272e;
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #ffd000;
-  color: #ffd000;
-  transform: translateY(-2px);
-}
-
-/* Outline Gold Button */
-.btn-outline-gold {
-  background: transparent;
-  color: #ffd000;
-  border: 1px solid #ffd000;
-}
-
-.btn-outline-gold:hover {
-  background: rgba(255, 208, 0, 0.1);
-  box-shadow: 0 0 15px rgba(255, 208, 0, 0.25);
-}
-
-/* Hot Crimson Button */
-.btn-hot {
-  background: #ff3366;
+  background: #485460;
   color: #ffffff;
-  font-weight: 800;
-  box-shadow: 0 4px 16px rgba(255, 51, 102, 0.35);
-}
-
-.btn-hot:hover {
-  background: #ff4d79;
   transform: translateY(-2px);
-  box-shadow: 0 6px 22px rgba(255, 51, 102, 0.5);
+  box-shadow: 0 7px 0 #1e272e;
 }
 
-/* App Container */
+.btn-secondary:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #1e272e;
+}
+
+/* Red / Danger 3D Button (Exit / Terminate) */
+.btn-hot, .btn-danger {
+  background: #ee5253;
+  color: #ffffff;
+  box-shadow: 0 5px 0 #b33939;
+}
+
+.btn-hot:hover, .btn-danger:hover {
+  background: #ff6b6b;
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #b33939;
+}
+
+.btn-hot:active, .btn-danger:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #b33939;
+}
+
+/* App Main Container */
 .app-container {
-  max-width: 1400px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 1.5rem 2rem;
+  padding: 1.25rem 1.5rem;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-/* Badges */
+/* Cartoon Badges */
 .badge-live {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 4px;
-  font-size: 0.72rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
   font-weight: 800;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  background: #ffd000;
-  color: #000;
+  background: #10ac84;
+  color: #ffffff;
+  border: 2px solid #090e18;
+  box-shadow: 0 3px 0 #0b6850;
 }
 
 .badge-tag {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-family: var(--font-gaming);
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
   font-weight: 800;
-  letter-spacing: 0.5px;
   text-transform: uppercase;
+  border: 1.5px solid rgba(0,0,0,0.3);
 }
 
-/* Custom Sliders */
+/* Skribbl Player List Item */
+.skribbl-player-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: var(--border-card);
+  box-shadow: 0 3px 0 #0e1726;
+  margin-bottom: 0.45rem;
+  transition: transform 0.1s ease;
+}
+
+.skribbl-player-row.active-drawing {
+  background: #10ac84 !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 4px 0 #0b6850 !important;
+  transform: scale(1.02);
+}
+
+/* Custom Skribbl Range Sliders */
 input[type=range] {
   -webkit-appearance: none;
   background: transparent;
+  width: 100%;
 }
 
 input[type=range]:focus {
@@ -212,21 +234,23 @@ input[type=range]:focus {
 
 input[type=range]::-webkit-slider-runnable-track {
   width: 100%;
-  height: 6px;
+  height: 10px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  background: #090e18;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
 input[type=range]::-webkit-slider-thumb {
-  height: 18px;
-  width: 18px;
+  height: 24px;
+  width: 24px;
   border-radius: 50%;
-  background: #ffd000;
+  background: #feca57;
   cursor: pointer;
   -webkit-appearance: none;
-  margin-top: -6px;
-  box-shadow: 0 0 10px #ffd000;
+  margin-top: -7px;
+  border: 3px solid #ff9f43;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
   transition: transform 0.1s ease;
 }
 
@@ -234,44 +258,23 @@ input[type=range]::-webkit-slider-thumb:hover {
   transform: scale(1.2);
 }
 
-/* Level Up & Achievement Animations */
-@keyframes levelUpPop {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.15);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes goldGlow {
-  0%, 100% {
-    box-shadow: 0 0 15px rgba(255, 208, 0, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 35px rgba(255, 208, 0, 0.8);
-  }
+/* Bouncy Level-Up Celebration */
+@keyframes bouncePop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.1); opacity: 1; }
+  80% { transform: scale(0.95); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 .level-up-pop {
-  animation: levelUpPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  animation: bouncePop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
-.gold-glow {
-  animation: goldGlow 2s infinite;
+@keyframes cartoonPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
-.laser-pulse {
-  animation: pulse 1.2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+.pulse-bubble {
+  animation: cartoonPulse 1.2s infinite ease-in-out;
 }

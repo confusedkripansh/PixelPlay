@@ -118,8 +118,13 @@ func (r *Room) GetFullState() models.GameState {
 		state.JudgeSubmissions = make(map[string]int)
 	}
 
-	// 1. Add active local clients
+	// 1. Add active local clients (deduplicated by UserID to guarantee atomic presence)
+	seenUsers := make(map[string]bool)
 	for client := range r.Clients {
+		if client.UserID == "" || seenUsers[client.UserID] {
+			continue
+		}
+		seenUsers[client.UserID] = true
 		info := models.PlayerInfo{
 			UserID:         client.UserID,
 			Name:           client.Name,
@@ -135,8 +140,12 @@ func (r *Room) GetFullState() models.GameState {
 		}
 	}
 
-	// 2. Add players who disconnected recently and have a 30s grace window to reconnect
+	// 2. Add players who disconnected recently and have a grace window to reconnect
 	for _, client := range r.Disconnected {
+		if client.UserID == "" || seenUsers[client.UserID] {
+			continue
+		}
+		seenUsers[client.UserID] = true
 		info := models.PlayerInfo{
 			UserID:         client.UserID,
 			Name:           client.Name,
@@ -230,9 +239,23 @@ func (r *Room) Run() {
 		// New client connected to this server
 		case client := <-r.Register:
 			r.mu.Lock()
-			// Check if this player is returning within their 30-second reconnection grace period!
+			// ATOMIC PRESENCE: Remove any prior connection for this UserID from r.Clients
+			for existingClient := range r.Clients {
+				if existingClient.UserID == client.UserID {
+					// Inherit prior assigned role so refresh preserves their team/judge assignment!
+					if client.Role == "" || client.Role == "teamA" {
+						client.Role = existingClient.Role
+					}
+					delete(r.Clients, existingClient)
+					close(existingClient.Send)
+					log.Printf("Atomic Presence: Replaced stale connection for player %s in room %s", client.UserID, r.ID)
+				}
+			}
+			// Check if this player is returning within their reconnection grace period!
 			if oldClient, reconnected := r.Disconnected[client.UserID]; reconnected {
-				client.Role = oldClient.Role
+				if client.Role == "" || client.Role == "teamA" {
+					client.Role = oldClient.Role
+				}
 				delete(r.Disconnected, client.UserID)
 				log.Printf("Player %s successfully reconnected to room %s within grace period!", client.UserID, r.ID)
 			}
@@ -276,31 +299,49 @@ func (r *Room) Run() {
 				delete(r.Clients, client)
 				close(client.Send)
 
-				// SEMANTIC RULE: If the room owner / admin leaves, terminate the room!
-				if client.UserID == r.State.AdminID {
-					r.mu.Unlock()
-					log.Printf("Room %s: Owner %s left. Terminating room.", r.ID, client.UserID)
-					r.Terminate("The room owner has left. The room has been terminated.")
-					return
+				// ATOMIC PRESENCE: Check if another active connection for this UserID is already live in r.Clients!
+				hasAnotherLiveConn := false
+				for active := range r.Clients {
+					if active.UserID == client.UserID {
+						hasAnotherLiveConn = true
+						break
+					}
 				}
 
-				// Instead of immediate purging, grant a 30s grace window for reconnection
-				r.Disconnected[client.UserID] = client
-				uid := client.UserID
+				if !hasAnotherLiveConn {
+					r.Disconnected[client.UserID] = client
+					uid := client.UserID
+					isAdmin := (client.UserID == r.State.AdminID)
 
-				go func(targetUID string) {
-					time.Sleep(30 * time.Second)
-					r.mu.Lock()
-					// If the user hasn't reconnected after 30 seconds, permanently remove them
-					if _, stillDisconnected := r.Disconnected[targetUID]; stillDisconnected {
-						delete(r.Disconnected, targetUID)
-						r.mu.Unlock()
-						log.Printf("Player %s grace period expired. Removed from room %s.", targetUID, r.ID)
-						r.BroadcastState()
-					} else {
-						r.mu.Unlock()
-					}
-				}(uid)
+					go func(targetUID string, admin bool) {
+						time.Sleep(20 * time.Second)
+						r.mu.Lock()
+						// Check if the user has reconnected in r.Clients
+						hasReconnected := false
+						for active := range r.Clients {
+							if active.UserID == targetUID {
+								hasReconnected = true
+								break
+							}
+						}
+
+						if !hasReconnected {
+							delete(r.Disconnected, targetUID)
+							if admin {
+								r.mu.Unlock()
+								log.Printf("Room %s: Host %s left and did not reconnect within grace period. Terminating room.", r.ID, targetUID)
+								r.Terminate("The room owner has left. The room has been terminated.")
+								return
+							}
+							r.mu.Unlock()
+							log.Printf("Player %s grace period expired. Removed from room %s.", targetUID, r.ID)
+							r.BroadcastState()
+						} else {
+							delete(r.Disconnected, targetUID)
+							r.mu.Unlock()
+						}
+					}(uid, isAdmin)
+				}
 			}
 			r.mu.Unlock()
 			go r.BroadcastState()

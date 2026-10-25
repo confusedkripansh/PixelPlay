@@ -14,7 +14,7 @@ const Login = () => {
     const guestId = 'guest-' + Math.floor(100000 + Math.random() * 900000);
     const guestUser = {
       googleId: guestId,
-      name: inGameName.trim() || `Pilot_${guestId.slice(-4)}`,
+      name: inGameName.trim() || `Player_${guestId.slice(-4)}`,
       avatarUrl: '',
       stats: { wins: 0, losses: 0, experience: 0, totalPoints: 0 }
     };
@@ -24,62 +24,63 @@ const Login = () => {
 
   return (
     <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-      <div className="login-container glass-panel" style={{ 
+      <div className="io-card" style={{ 
         padding: '2.5rem', 
         textAlign: 'center', 
-        maxWidth: '420px', 
+        maxWidth: '440px', 
         width: '100%',
-        borderTop: '4px solid #ffd000',
-        boxShadow: '0 0 35px rgba(255, 208, 0, 0.15)'
+        borderTop: '6px solid #feca57'
       }}>
         <div style={{ 
-          width: '54px', 
-          height: '54px', 
-          borderRadius: '8px', 
-          background: 'rgba(255, 208, 0, 0.15)', 
-          border: '1px solid #ffd000',
+          width: '60px', 
+          height: '60px', 
+          borderRadius: '50%', 
+          background: '#feca57', 
+          border: '3px solid #090e18',
+          boxShadow: '0 4px 0 #ff9f43',
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center',
-          margin: '0 auto 1rem',
-          boxShadow: '0 0 15px rgba(255, 208, 0, 0.25)'
+          margin: '0 auto 1rem'
         }}>
-          <IconSwords size={26} color="#ffd000" />
+          <IconSwords size={30} color="#222f3e" />
         </div>
-        <h1 className="logo" style={{ marginBottom: '0.2rem', fontSize: '1.8rem', letterSpacing: '0.5px' }}>
-          PIXEL<span style={{ color: '#ffd000' }}>PLAY</span>
+
+        <h1 style={{ marginBottom: '0.2rem', fontSize: '2.2rem', color: '#ffffff' }}>
+          PIXEL<span style={{ color: '#feca57' }}>PLAY.IO</span>
         </h1>
-        <h2 style={{ marginBottom: '0.4rem', fontSize: '0.95rem', color: '#f8fafc', fontWeight: 800, letterSpacing: '0.5px' }}>
-          COMPETITIVE DRAWING CONTEST
+        <h2 style={{ marginBottom: '0.5rem', fontSize: '1rem', color: '#1dd1a1', fontWeight: 800 }}>
+          MULTIPLAYER DRAWING GAME
         </h2>
-        <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.8rem', lineHeight: '1.4' }}>
-          Sign in via Google to permanently record your tournament career, or deploy instantly as an unverified guest pilot.
+        <p style={{ color: '#c8d6e5', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+          Sign in to save your level and stats, or jump straight into the game as a guest!
         </p>
 
         {errorMessage && (
-          <div style={{ background: 'rgba(255, 51, 102, 0.15)', border: '1px solid #ff3366', color: '#fca5a5', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.8rem', textAlign: 'left' }}>
+          <div style={{ background: '#ee5253', border: '2px solid #090e18', color: '#fff', padding: '0.65rem', borderRadius: '10px', marginBottom: '1.25rem', fontSize: '0.8rem', fontWeight: 800 }}>
             {errorMessage}
           </div>
         )}
 
-        <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
-          <label style={{ color: '#94a3b8', display: 'block', marginBottom: '0.4rem', fontSize: '0.75rem', fontWeight: 800 }}>
-            CALL-SIGN / NAME (OPTIONAL)
+        <div style={{ marginBottom: '1.25rem', textAlign: 'left' }}>
+          <label style={{ color: '#c8d6e5', display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem', fontWeight: 800 }}>
+            NICKNAME (OPTIONAL)
           </label>
           <input 
             type="text" 
             value={inGameName}
             onChange={(e) => setInGameName(e.target.value)}
-            placeholder="e.g. CyberViper"
+            placeholder="e.g. MasterArtist"
             style={{ 
               width: '100%', 
               padding: '0.75rem', 
-              borderRadius: '6px', 
-              border: '1px solid rgba(255, 208, 0, 0.4)', 
-              background: '#111319', 
+              borderRadius: '10px', 
+              border: '2px solid #090e18', 
+              background: '#24375d', 
               color: 'white', 
               outline: 'none',
-              fontWeight: 800
+              fontWeight: 900,
+              fontSize: '1rem'
             }}
           />
         </div>
@@ -118,25 +119,25 @@ const Login = () => {
             theme="filled_black"
           />
 
-          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '0.75rem', margin: '0.25rem 0' }}>
-            <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
-            <span style={{ color: '#64748b', fontSize: '0.7rem', fontWeight: 800 }}>OR DIRECT ENTRY</span>
-            <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '0.75rem', margin: '0.2rem 0' }}>
+            <div style={{ flex: 1, height: '2px', background: '#090e18' }}></div>
+            <span style={{ color: '#8395a7', fontSize: '0.75rem', fontWeight: 900 }}>OR</span>
+            <div style={{ flex: 1, height: '2px', background: '#090e18' }}></div>
           </div>
 
           <button 
             onClick={handleGuestLogin}
-            className="btn btn-secondary"
-            style={{ width: '100%', padding: '0.75rem', fontSize: '0.8rem' }}
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '0.85rem' }}
           >
-            <IconUser size={16} />
-            <span>Deploy as Guest Pilot</span>
+            <IconUser size={18} />
+            <span>PLAY AS GUEST</span>
           </button>
         </div>
 
         {isLoading && (
-          <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#ffd000' }}>
-            <span className="laser-pulse">Connecting to arena cluster...</span>
+          <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#feca57', fontWeight: 800 }}>
+            Connecting to game server...
           </div>
         )}
       </div>

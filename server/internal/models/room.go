@@ -30,6 +30,8 @@ type GameState struct {
 	ActivePlayerID   string         `json:"activePlayerId"`
 	ActiveTeamStep   int            `json:"activeTeamStep"`
 	TotalTeamSteps   int            `json:"totalTeamSteps"`
+	TeamAOrder       []string       `json:"teamAOrder,omitempty"`
+	TeamBOrder       []string       `json:"teamBOrder,omitempty"`
 	CurrentWord      string         `json:"currentWord,omitempty"`
 	AdminID          string         `json:"adminId"`
 	TeamA            []PlayerInfo   `json:"teamA"`

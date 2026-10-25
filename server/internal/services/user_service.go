@@ -54,16 +54,24 @@ func (s *userService) QueueGameStatsUpdate(googleId string, status string, point
 // "func (s *userService)" is a Receiver. This means UpsertGoogleUser is a method attached to the userService struct,
 // similar to defining a method inside a Class in JavaScript. "s" is like "this" in JavaScript.
 func (s *userService) UpsertGoogleUser(ctx context.Context, googleId, name, avatarUrl string) (*models.User, error) {
-	// Select the "users" collection from the database.
 	collection := s.db.Collection("users")
-
-	// bson.M is a map (dictionary). It's essentially how we write JSON in Go to query MongoDB.
 	filter := bson.M{"googleId": googleId}
-	
+
+	// 1. Check if user already exists in DB
+	var existing models.User
+	err := collection.FindOne(ctx, filter).Decode(&existing)
+	if err == nil {
+		// User already exists! PRESERVE their custom edited name and avatar so logout/login never resets it!
+		if existing.Name != "" {
+			return &existing, nil
+		}
+	}
+
+	// 2. New user or empty profile: insert initial profile from Google
 	update := bson.M{
-		// $setOnInsert is a MongoDB operator. It only applies these fields if a NEW document is being created.
-		// If the user already exists, it ignores this, so we don't accidentally reset their stats to 0!
 		"$setOnInsert": bson.M{
+			"name":      name,
+			"avatarUrl": avatarUrl,
 			"stats": models.UserStats{
 				Wins:        0,
 				Losses:      0,
@@ -72,32 +80,18 @@ func (s *userService) UpsertGoogleUser(ctx context.Context, googleId, name, avat
 			},
 			"createdAt": time.Now(),
 		},
-		// $set is a MongoDB operator that always updates these fields, even if the user exists.
-		// We always update the name and avatar in case they changed it on their Google account recently.
-		"$set": bson.M{
-			"name":      name,
-			"avatarUrl": avatarUrl,
-		},
 	}
-	
-	// SetUpsert(true) tells MongoDB: "If you can't find a user with this filter, create one using the update data."
 	opts := options.Update().SetUpsert(true)
-	
-	// Execute the update query.
-	_, err := collection.UpdateOne(ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create an empty models.User struct to hold the data we are about to fetch.
 	var user models.User
-	// Find the user we just updated, and Decode (convert) the BSON data directly into our Go struct.
 	err = collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		return nil, err
 	}
-
-	// Return a pointer to the populated user struct, and nil for the error.
 	return &user, nil
 }
 

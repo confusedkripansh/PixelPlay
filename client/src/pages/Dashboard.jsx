@@ -78,9 +78,13 @@ const Dashboard = () => {
 
     // 2. Persist to MongoDB backend
     try {
+      const token = localStorage.getItem('pixel_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE_URL}/api/user/update/${currentUser.googleId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ 
           name: editName.trim(), 
           avatarUrl: editAvatar.trim() 
@@ -88,6 +92,10 @@ const Dashboard = () => {
       });
       const data = await res.json();
       if (data.status === 'success') {
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem('pixel_user', JSON.stringify(data.user));
+        }
         setSaveSuccess(true);
         setTimeout(() => {
           setIsEditing(false);

@@ -27,7 +27,8 @@ const Canvas = forwardRef(({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
-      drawSmoothStroke(ctx, stroke.x0, stroke.y0, stroke.x1, stroke.y1, stroke.color);
+      const size = stroke.size || 8;
+      drawSmoothStroke(ctx, stroke.x0, stroke.y0, stroke.x1, stroke.y1, stroke.color, size);
     },
     syncFullStrokes: (strokes) => {
       const canvas = canvasRef.current;
@@ -38,7 +39,8 @@ const Canvas = forwardRef(({
       
       if (Array.isArray(strokes)) {
         strokes.forEach(stroke => {
-          drawSmoothStroke(ctx, stroke.x0, stroke.y0, stroke.x1, stroke.y1, stroke.color);
+          const size = stroke.size || 8;
+          drawSmoothStroke(ctx, stroke.x0, stroke.y0, stroke.x1, stroke.y1, stroke.color, size);
         });
       }
     }
@@ -54,20 +56,31 @@ const Canvas = forwardRef(({
     ctx.lineJoin = 'round';
   }, []);
 
-  const drawSmoothStroke = (ctx, x0, y0, x1, y1, color) => {
+  const drawSmoothStroke = (ctx, x0, y0, x1, y1, color, size = 8) => {
     if (!ctx) return;
+    const startX = Number(x0);
+    const startY = Number(y0);
+    const endX = Number(x1);
+    const endY = Number(y1);
+    if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY)) return;
+
+    const strokeWidth = Number(size) || 8;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = brushSize;
+    ctx.lineWidth = strokeWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
     ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x1, y1, brushSize / 2, 0, Math.PI * 2);
-    ctx.fill();
+    // Differentiate single click (dot) from continuous segment to avoid beading aliasing
+    if (Math.abs(startX - endX) < 0.1 && Math.abs(startY - endY) < 0.1) {
+      ctx.arc(startX, startY, strokeWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
   };
 
   const getCoordinates = (e) => {
@@ -107,11 +120,12 @@ const Canvas = forwardRef(({
 
       if (onPixelDraw) {
         onPixelDraw({
-          x0: pos.x,
-          y0: pos.y,
-          x1: pos.x,
-          y1: pos.y,
-          color: activeColor
+          x0: Math.round(pos.x * 10) / 10,
+          y0: Math.round(pos.y * 10) / 10,
+          x1: Math.round(pos.x * 10) / 10,
+          y1: Math.round(pos.y * 10) / 10,
+          color: activeColor,
+          size: brushSize
         });
       }
     }
@@ -138,7 +152,7 @@ const Canvas = forwardRef(({
       return;
     }
 
-    drawSmoothStroke(ctx, lastPos.current.x, lastPos.current.y, currentPos.x, currentPos.y, activeColor);
+    drawSmoothStroke(ctx, lastPos.current.x, lastPos.current.y, currentPos.x, currentPos.y, activeColor, brushSize);
     setInkUsed(prev => prev + distance);
 
     if (onPixelDraw) {
@@ -146,8 +160,9 @@ const Canvas = forwardRef(({
         x0: Math.round(lastPos.current.x * 10) / 10,
         y0: Math.round(lastPos.current.y * 10) / 10,
         x1: Math.round(currentPos.x * 10) / 10,
-        y1: Math.round(currentPos.x * 10) / 10,
-        color: activeColor
+        y1: Math.round(currentPos.y * 10) / 10,
+        color: activeColor,
+        size: brushSize
       });
     }
 
@@ -246,6 +261,8 @@ const Canvas = forwardRef(({
           onTouchEnd={stopDrawing}
           style={{
             width: '100%',
+            height: 'auto',
+            display: 'block',
             aspectRatio: '560/480',
             cursor: isMyTurn && inkUsed < pixelsPerTurn ? 'crosshair' : 'default',
             backgroundColor: '#ffffff',
@@ -290,30 +307,44 @@ const Canvas = forwardRef(({
             ))}
           </div>
 
-          {/* Brush sizes */}
-          <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-            {[4, 8, 14, 22].map((size) => (
+          {/* Brush sizes with dynamic size indicator pills */}
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+            {[
+              { size: 4, dotPx: 5, label: 'Fine' },
+              { size: 8, dotPx: 9, label: 'Medium' },
+              { size: 14, dotPx: 14, label: 'Thick' },
+              { size: 22, dotPx: 20, label: 'Chunky' }
+            ].map(({ size, dotPx, label }) => (
               <button
                 key={size}
                 type="button"
+                title={`Brush: ${label} (${size}px)`}
                 onClick={() => setBrushSize(size)}
                 style={{
-                  width: '28px',
-                  height: '28px',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '8px',
                   background: brushSize === size ? '#feca57' : '#34495e',
-                  color: brushSize === size ? '#222f3e' : '#fff',
-                  border: '2px solid #090e18',
-                  boxShadow: '0 2px 0 #090e18',
+                  border: brushSize === size ? '2.5px solid #ffffff' : '2px solid #090e18',
+                  boxShadow: brushSize === size ? '0 0 8px #feca57' : '0 2px 0 #090e18',
                   cursor: 'pointer',
-                  fontWeight: 900,
-                  fontSize: '0.75rem',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  padding: 0,
+                  transition: 'transform 0.1s ease, border-color 0.1s ease',
+                  transform: brushSize === size ? 'scale(1.08)' : 'scale(1)'
                 }}
               >
-                ●
+                <span
+                  style={{
+                    width: `${dotPx}px`,
+                    height: `${dotPx}px`,
+                    borderRadius: '50%',
+                    background: brushSize === size ? '#222f3e' : '#ffffff',
+                    display: 'inline-block'
+                  }}
+                />
               </button>
             ))}
           </div>

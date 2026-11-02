@@ -81,6 +81,12 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		return
 	}
 
+	// If the user explicitly typed a custom nickname on the login form, persist it immediately!
+	if req.InGameName != "" && user.Name != req.InGameName {
+		_ = h.userService.UpdateUserProfile(context.Background(), googleId, req.InGameName, user.AvatarURL)
+		user.Name = req.InGameName
+	}
+
 	// Generate a real JWT token signed by our server
 	serverSecret := os.Getenv("JWT_SECRET")
 	var tokenString string

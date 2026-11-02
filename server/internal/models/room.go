@@ -1,10 +1,11 @@
 package models
 
 type RoomSettings struct {
-	MaxRounds        int    `json:"maxRounds"`
-	Mode             string `json:"mode"` // "time_limit" or "round_limit"
-	TimeLimitSeconds int    `json:"timeLimitSeconds"`
-	InkLimit         int    `json:"inkLimit"` // Ink/pixels granted per turn (e.g. 500 - 3000)
+	MaxRounds          int    `json:"maxRounds"`
+	Mode               string `json:"mode"` // "time_limit" or "round_limit"
+	TimeLimitSeconds   int    `json:"timeLimitSeconds"`
+	InkLimit           int    `json:"inkLimit"`           // Ink/pixels granted per turn (e.g. 500 - 3000)
+	JudgingTimeSeconds int    `json:"judgingTimeSeconds"` // Dynamic referee rating timer (min 40s)
 }
 
 type PlayerInfo struct {
@@ -20,6 +21,7 @@ type Stroke struct {
 	X1    float64 `json:"x1"`
 	Y1    float64 `json:"y1"`
 	Color string  `json:"color"`
+	Size  float64 `json:"size,omitempty"`
 }
 
 type GameState struct {
@@ -41,6 +43,8 @@ type GameState struct {
 	UsedWords        []string       `json:"usedWords,omitempty"`
 	Settings         RoomSettings   `json:"settings"`
 	JudgeSubmissions map[string]int `json:"judgeSubmissions,omitempty"`
+	JudgingDeadline  int64          `json:"judgingDeadline,omitempty"`  // Unix timestamp (ms) when rating period closes
+	JudgingDuration  int            `json:"judgingDuration,omitempty"`  // Configured duration in seconds
 	LastMeanScore    int            `json:"lastMeanScore,omitempty"`
 }
 

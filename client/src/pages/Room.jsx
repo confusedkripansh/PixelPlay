@@ -27,6 +27,7 @@ const Room = () => {
   const [role, setRole] = useState('teamA'); // teamA, teamB, judge
   const [serverState, setServerState] = useState(null);
   const [timeLeft, setTimeLeft] = useState(60);
+  const [judgingTimeLeft, setJudgingTimeLeft] = useState(40);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [matchResult, setMatchResult] = useState(null);
   
@@ -34,6 +35,7 @@ const Room = () => {
   const [sliderTime, setSliderTime] = useState(60);
   const [sliderInk, setSliderInk] = useState(1000);
   const [sliderRounds, setSliderRounds] = useState(3);
+  const [sliderJudgingTime, setSliderJudgingTime] = useState(40);
   
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
@@ -57,8 +59,35 @@ const Room = () => {
       if (serverState.settings.maxRounds) {
         setSliderRounds(serverState.settings.maxRounds);
       }
+      if (serverState.settings.judgingTimeSeconds) {
+        setSliderJudgingTime(serverState.settings.judgingTimeSeconds);
+      }
     }
-  }, [serverState?.settings?.timeLimitSeconds, serverState?.settings?.inkLimit, serverState?.settings?.maxRounds]);
+  }, [serverState?.settings?.timeLimitSeconds, serverState?.settings?.inkLimit, serverState?.settings?.maxRounds, serverState?.settings?.judgingTimeSeconds]);
+
+  // Dynamic referee judging countdown timer
+  useEffect(() => {
+    let timer;
+    if (gameState === 'judging') {
+      const duration = serverState?.settings?.judgingTimeSeconds || 40;
+      if (serverState?.judgingDeadline) {
+        setJudgingTimeLeft(Math.max(0, Math.ceil((serverState.judgingDeadline - Date.now()) / 1000)));
+      } else {
+        setJudgingTimeLeft(duration);
+      }
+
+      const updateJudgingCountdown = () => {
+        if (serverState?.judgingDeadline) {
+          const diff = Math.max(0, Math.ceil((serverState.judgingDeadline - Date.now()) / 1000));
+          setJudgingTimeLeft(diff);
+        } else {
+          setJudgingTimeLeft(prev => Math.max(0, prev - 1));
+        }
+      };
+      timer = setInterval(updateJudgingCountdown, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [gameState, serverState?.judgingDeadline, serverState?.settings?.judgingTimeSeconds]);
 
   // Establish WebSocket connection
   useEffect(() => {
@@ -97,6 +126,14 @@ const Room = () => {
         case 'state_update':
           setServerState(msg.payload);
           setGameState(msg.payload.status);
+          // ROLE PRESERVATION: Automatically sync local role if server recorded player as judge or team
+          if (msg.payload?.judges?.some(p => p.userId === user.googleId)) {
+            setRole('judge');
+          } else if (msg.payload?.teamB?.some(p => p.userId === user.googleId)) {
+            setRole('teamB');
+          } else if (msg.payload?.teamA?.some(p => p.userId === user.googleId)) {
+            setRole('teamA');
+          }
           break;
         case 'match_summary':
           if (msg.payload?.results && !matchSummaryProcessedRef.current) {
@@ -229,14 +266,15 @@ const Room = () => {
     }
   };
 
-  const handleUpdateSettings = (timeLimit, inkLimit, rounds) => {
+  const handleUpdateSettings = (timeLimit, inkLimit, rounds, judgingTime) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'update_settings',
         payload: {
           timeLimitSeconds: Number(timeLimit),
           inkLimit: Number(inkLimit),
-          maxRounds: Number(rounds)
+          maxRounds: Number(rounds),
+          judgingTimeSeconds: Number(judgingTime)
         }
       }));
     }
@@ -245,28 +283,40 @@ const Room = () => {
   const handleSliderTimeChange = (val) => {
     const num = Number(val);
     setSliderTime(num);
-    handleUpdateSettings(num, sliderInk, sliderRounds);
+    handleUpdateSettings(num, sliderInk, sliderRounds, sliderJudgingTime);
   };
 
   const handleSliderInkChange = (val) => {
     const num = Number(val);
     setSliderInk(num);
-    handleUpdateSettings(sliderTime, num, sliderRounds);
+    handleUpdateSettings(sliderTime, num, sliderRounds, sliderJudgingTime);
   };
 
   const handleSliderRoundsChange = (val) => {
     const num = Number(val);
     setSliderRounds(num);
-    handleUpdateSettings(sliderTime, sliderInk, num);
+    handleUpdateSettings(sliderTime, sliderInk, num, sliderJudgingTime);
+  };
+
+  const handleSliderJudgingTimeChange = (val) => {
+    const num = Number(val);
+    setSliderJudgingTime(num);
+    handleUpdateSettings(sliderTime, sliderInk, sliderRounds, num);
   };
 
   const handleLeaveRoom = () => {
     if (isAdmin) {
       if (window.confirm("As room host, leaving will terminate this room for everyone. Are you sure?")) {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'terminate_room' }));
+        }
         wsRef.current?.close();
         navigate('/lobby');
       }
     } else {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'leave_room' }));
+      }
       wsRef.current?.close();
       navigate('/lobby');
     }
@@ -419,17 +469,17 @@ const Room = () => {
               width: '54px',
               height: '54px',
               borderRadius: '50%',
-              background: timeLeft <= 10 ? '#ee5253' : '#10ac84',
+              background: (gameState === 'judging' ? judgingTimeLeft <= 10 : timeLeft <= 10) ? '#ee5253' : '#10ac84',
               color: '#ffffff',
               border: '3px solid #090e18',
-              boxShadow: timeLeft <= 10 ? '0 4px 0 #b33939' : '0 4px 0 #0b6850',
+              boxShadow: (gameState === 'judging' ? judgingTimeLeft <= 10 : timeLeft <= 10) ? '0 4px 0 #b33939' : '0 4px 0 #0b6850',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
               fontSize: '1.4rem'
             }}>
-              {timeLeft}
+              {gameState === 'judging' ? judgingTimeLeft : timeLeft}
             </div>
 
             {/* Word Banner */}
@@ -705,12 +755,12 @@ const Room = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', fontSize: '0.85rem', fontWeight: 800 }}>
                       <span style={{ color: '#c8d6e5' }}>Turn Time per Player:</span>
-                      <strong style={{ color: '#feca57' }}>{sliderTime} Seconds</strong>
+                      <strong style={{ color: '#feca57' }}>{sliderTime} Seconds (Min: 30s)</strong>
                     </div>
                     <input 
                       type="range" 
-                      min="15" 
-                      max="120" 
+                      min="30" 
+                      max="180" 
                       step="5"
                       value={sliderTime} 
                       onChange={(e) => handleSliderTimeChange(e.target.value)}
@@ -721,15 +771,31 @@ const Room = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', fontSize: '0.85rem', fontWeight: 800 }}>
                       <span style={{ color: '#c8d6e5' }}>Ink Limit per Player:</span>
-                      <strong style={{ color: '#feca57' }}>{sliderInk} Pixels</strong>
+                      <strong style={{ color: '#feca57' }}>{sliderInk} Pixels (Min: 500px)</strong>
                     </div>
                     <input 
                       type="range" 
-                      min="400" 
-                      max="3000" 
+                      min="500" 
+                      max="5000" 
                       step="100"
                       value={sliderInk} 
                       onChange={(e) => handleSliderInkChange(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Referee Rating Time */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', fontSize: '0.85rem', fontWeight: 800 }}>
+                      <span style={{ color: '#c8d6e5' }}>Referee Rating Time:</span>
+                      <strong style={{ color: '#feca57' }}>{sliderJudgingTime} Seconds (Min: 40s)</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="40" 
+                      max="180" 
+                      step="5"
+                      value={sliderJudgingTime} 
+                      onChange={(e) => handleSliderJudgingTimeChange(e.target.value)}
                     />
                   </div>
 
@@ -744,10 +810,11 @@ const Room = () => {
                   </button>
                 </div>
               ) : (
-                <div style={{ background: '#24375d', border: '3px solid #090e18', padding: '1rem 1.5rem', borderRadius: '12px', display: 'flex', gap: '1.5rem', fontSize: '0.9rem', fontWeight: 800 }}>
+                <div style={{ background: '#24375d', border: '3px solid #090e18', padding: '1rem 1.5rem', borderRadius: '12px', display: 'flex', gap: '1.2rem', fontSize: '0.85rem', fontWeight: 800, flexWrap: 'wrap' }}>
                   <span>🎯 Rounds: <strong style={{ color: '#feca57' }}>{maxRoundsCount}</strong></span>
                   <span>⏳ Turn: <strong style={{ color: '#feca57' }}>{serverState?.settings?.timeLimitSeconds || 60}s</strong></span>
                   <span>🎨 Ink: <strong style={{ color: '#feca57' }}>{serverState?.settings?.inkLimit || 1000}px</strong></span>
+                  <span>⚖️ Judge: <strong style={{ color: '#feca57' }}>{serverState?.settings?.judgingTimeSeconds || 40}s</strong></span>
                 </div>
               )}
             </div>
@@ -790,8 +857,21 @@ const Room = () => {
                   <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#feca57', marginBottom: '0.4rem' }}>
                     REFEREE EVALUATION STAGE
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#c8d6e5', marginBottom: '0.75rem' }}>
-                    Referees Voted: <strong>{submittedJudgesCount} of {totalJudges}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#c8d6e5' }}>
+                      Referees Voted: <strong>{submittedJudgesCount} of {totalJudges}</strong>
+                    </span>
+                    <span style={{
+                      background: judgingTimeLeft <= 10 ? 'rgba(235, 77, 75, 0.25)' : 'rgba(254, 202, 87, 0.15)',
+                      border: `1.5px solid ${judgingTimeLeft <= 10 ? '#eb4d4b' : '#feca57'}`,
+                      color: judgingTimeLeft <= 10 ? '#ff7979' : '#feca57',
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      fontWeight: 900
+                    }}>
+                      ⏳ Timer: {judgingTimeLeft}s {judgingTimeLeft <= 0 ? '(Auto-scoring 5)' : ''}
+                    </span>
                   </div>
 
                   {role === 'judge' ? (

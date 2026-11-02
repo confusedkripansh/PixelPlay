@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -14,10 +16,17 @@ import (
 )
 
 // getDeterministicTeamPlayers gathers unique players on a team in a deterministic, sorted order so turns are never skipped.
-func getDeterministicTeamPlayers(clients map[*Client]bool, role string) []string {
+// It inspects both actively connected clients and temporarily disconnected clients (in grace period) to prevent skipping turns during page reloads.
+func getDeterministicTeamPlayers(r *Room, role string) []string {
 	seen := make(map[string]bool)
 	var list []string
-	for c := range clients {
+	for c := range r.Clients {
+		if c.Role == role && c.UserID != "" && !seen[c.UserID] {
+			seen[c.UserID] = true
+			list = append(list, c.UserID)
+		}
+	}
+	for _, c := range r.Disconnected {
 		if c.Role == role && c.UserID != "" && !seen[c.UserID] {
 			seen[c.UserID] = true
 			list = append(list, c.UserID)
@@ -147,9 +156,15 @@ func (c *Client) ReadPump() {
 
 		// GAMEPLAY MESSAGE ROUTING
 		if wsMsg.Type == "draw_stroke" {
+			c.Room.mu.Lock()
+			// STRICT PERMISSION: Drawing is ONLY allowed during "playing" mode, and ONLY by the designated active drawer!
+			if c.Room.State.Status != "playing" || c.UserID != c.Room.State.ActivePlayerID {
+				c.Room.mu.Unlock()
+				continue
+			}
+
 			var stroke models.Stroke
 			if err := json.Unmarshal(wsMsg.Payload, &stroke); err == nil {
-				c.Room.mu.Lock()
 				c.Room.Strokes = append(c.Room.Strokes, stroke)
 				c.Room.mu.Unlock()
 
@@ -164,6 +179,8 @@ func (c *Client) ReadPump() {
 						_ = c.Room.RedisClient.AppendStroke(ctx, c.Room.ID, st)
 					}(stroke)
 				}
+			} else {
+				c.Room.mu.Unlock()
 			}
 		} else if wsMsg.Type == "switch_role" {
 			var rolePayload struct {
@@ -171,31 +188,56 @@ func (c *Client) ReadPump() {
 			}
 			if err := json.Unmarshal(wsMsg.Payload, &rolePayload); err == nil {
 				c.Room.mu.Lock()
-				c.Role = rolePayload.Role
+				// Only allow switching roles in the lobby phase before game starts!
+				if c.Room.State.Status == "lobby" {
+					c.Role = rolePayload.Role
+					if c.Room.RoleAssignments == nil {
+						c.Room.RoleAssignments = make(map[string]string)
+					}
+					c.Room.RoleAssignments[c.UserID] = rolePayload.Role
+				}
 				c.Room.mu.Unlock()
 				go c.Room.BroadcastState() // Tell everyone their role changed.
 			}
+		} else if wsMsg.Type == "terminate_room" || wsMsg.Type == "leave_room" {
+			c.Room.mu.Lock()
+			isAdmin := (c.UserID == c.Room.State.AdminID)
+			c.Room.mu.Unlock()
+			if isAdmin {
+				log.Printf("Host %s explicitly terminated room %s", c.UserID, c.Room.ID)
+				c.Room.Terminate("The host has ended this match.")
+				return
+			}
 		} else if wsMsg.Type == "update_settings" {
 			var settingsPayload struct {
-				TimeLimitSeconds int `json:"timeLimitSeconds"`
-				InkLimit         int `json:"inkLimit"`
-				MaxRounds        int `json:"maxRounds"`
+				TimeLimitSeconds   int `json:"timeLimitSeconds"`
+				InkLimit           int `json:"inkLimit"`
+				MaxRounds          int `json:"maxRounds"`
+				JudgingTimeSeconds int `json:"judgingTimeSeconds"`
 			}
 			if err := json.Unmarshal(wsMsg.Payload, &settingsPayload); err == nil {
 				c.Room.mu.Lock()
 				// Only the Room Owner / Admin is allowed to modify room settings!
 				if c.UserID == c.Room.State.AdminID {
-					if settingsPayload.TimeLimitSeconds >= 10 && settingsPayload.TimeLimitSeconds <= 300 {
+					// Strict bounds enforcement:
+					// 1. Turn Time: minimum 30s, maximum 300s
+					if settingsPayload.TimeLimitSeconds >= 30 && settingsPayload.TimeLimitSeconds <= 300 {
 						c.Room.Settings.TimeLimitSeconds = settingsPayload.TimeLimitSeconds
 					}
-					if settingsPayload.InkLimit >= 100 && settingsPayload.InkLimit <= 10000 {
+					// 2. Ink Limit: minimum 500 pixels, maximum 10,000 pixels
+					if settingsPayload.InkLimit >= 500 && settingsPayload.InkLimit <= 10000 {
 						c.Room.Settings.InkLimit = settingsPayload.InkLimit
 					}
-					if settingsPayload.MaxRounds >= 1 && settingsPayload.MaxRounds <= 20 {
+					// 3. Rounds: minimum 1 round, maximum 10 rounds
+					if settingsPayload.MaxRounds >= 1 && settingsPayload.MaxRounds <= 10 {
 						c.Room.Settings.MaxRounds = settingsPayload.MaxRounds
 					}
-					log.Printf("Room %s settings updated: TimeLimit=%ds, InkLimit=%d, MaxRounds=%d",
-						c.Room.ID, c.Room.Settings.TimeLimitSeconds, c.Room.Settings.InkLimit, c.Room.Settings.MaxRounds)
+					// 4. Referee Rating Time: minimum 40s (enforced), maximum 180s
+					if settingsPayload.JudgingTimeSeconds >= 40 && settingsPayload.JudgingTimeSeconds <= 180 {
+						c.Room.Settings.JudgingTimeSeconds = settingsPayload.JudgingTimeSeconds
+					}
+					log.Printf("Room %s settings updated: TimeLimit=%ds, InkLimit=%d, MaxRounds=%d, JudgingTime=%ds",
+						c.Room.ID, c.Room.Settings.TimeLimitSeconds, c.Room.Settings.InkLimit, c.Room.Settings.MaxRounds, c.Room.Settings.JudgingTimeSeconds)
 				}
 				c.Room.mu.Unlock()
 				go c.Room.BroadcastState()
@@ -220,21 +262,37 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			// SEMANTIC RULE: Cannot start game without at least one Judge!
+			// STRICT RULE: All 3 gameplay roles MUST have at least 1 player (Team Alpha, Team Beta, and Judge)!
+			hasTeamA := false
+			hasTeamB := false
 			hasJudge := false
 			for client := range c.Room.Clients {
-				if client.Role == "judge" {
+				if client.Role == "teamA" && client.UserID != "" {
+					hasTeamA = true
+				} else if client.Role == "teamB" && client.UserID != "" {
+					hasTeamB = true
+				} else if client.Role == "judge" && client.UserID != "" {
 					hasJudge = true
-					break
 				}
 			}
 
-			if !hasJudge {
+			if !hasTeamA || !hasTeamB || !hasJudge {
 				c.Room.mu.Unlock()
+				var missing []string
+				if !hasTeamA {
+					missing = append(missing, "Team Alpha (Blue)")
+				}
+				if !hasTeamB {
+					missing = append(missing, "Team Beta (Red)")
+				}
+				if !hasJudge {
+					missing = append(missing, "Judge (Referee)")
+				}
+
 				errMsg, _ := json.Marshal(map[string]interface{}{
 					"type": "error",
 					"payload": map[string]string{
-						"message": "Cannot start game without a Judge! At least one player must select the Judge role.",
+						"message": fmt.Sprintf("Cannot start game! The following role(s) must have at least 1 player: %s", strings.Join(missing, ", ")),
 					},
 				})
 				c.Send <- errMsg
@@ -247,6 +305,16 @@ func (c *Client) ReadPump() {
 			c.Room.State.ActiveTeam = "teamA"
 			c.Room.State.JudgeSubmissions = make(map[string]int)
 
+			// Permanently lock all currently active player roles into RoleAssignments
+			if c.Room.RoleAssignments == nil {
+				c.Room.RoleAssignments = make(map[string]string)
+			}
+			for cl := range c.Room.Clients {
+				if cl.UserID != "" && cl.Role != "" {
+					c.Room.RoleAssignments[cl.UserID] = cl.Role
+				}
+			}
+
 			// Clean slate for strokes: clear RAM, clear Redis
 			c.Room.Strokes = []models.Stroke{}
 			if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
@@ -258,7 +326,7 @@ func (c *Client) ReadPump() {
 			}
 			
 			// Deterministic team setup: sorted and deduplicated so no player is ever skipped
-			teamAOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamA")
+			teamAOrder := getDeterministicTeamPlayers(c.Room, "teamA")
 			c.Room.State.TeamAOrder = teamAOrder
 			c.Room.State.TotalTeamSteps = len(teamAOrder)
 			c.Room.State.ActiveTeamStep = 0
@@ -283,38 +351,7 @@ func (c *Client) ReadPump() {
 			c.Room.mu.Lock()
 			// STRICT PERMISSION: Only the active drawer can finish their turn/step early! Host cannot force early finish.
 			if c.Room.State.Status == "playing" && c.UserID == c.Room.State.ActivePlayerID {
-				var activeTeamOrder []string
-				if c.Room.State.ActiveTeam == "teamA" {
-					if len(c.Room.State.TeamAOrder) == 0 {
-						c.Room.State.TeamAOrder = getDeterministicTeamPlayers(c.Room.Clients, "teamA")
-					}
-					activeTeamOrder = c.Room.State.TeamAOrder
-				} else {
-					if len(c.Room.State.TeamBOrder) == 0 {
-						c.Room.State.TeamBOrder = getDeterministicTeamPlayers(c.Room.Clients, "teamB")
-					}
-					activeTeamOrder = c.Room.State.TeamBOrder
-				}
-
-				c.Room.State.TotalTeamSteps = len(activeTeamOrder)
-				c.Room.State.ActiveTeamStep++
-
-				if c.Room.State.ActiveTeamStep < len(activeTeamOrder) {
-					// Advance to the next player in deterministic order! Canvas is preserved.
-					c.Room.State.ActivePlayerID = activeTeamOrder[c.Room.State.ActiveTeamStep]
-				} else {
-					// All players on the team have completed their drawing step for this word -> transition to judging!
-					c.Room.State.Status = "judging"
-					c.Room.State.JudgeSubmissions = make(map[string]int)
-
-					// Broadcast stroke_sync to all clients so judges immediately have 100% of the completed drawing!
-					strokesBytes, _ := json.Marshal(c.Room.Strokes)
-					syncMsg, _ := json.Marshal(map[string]interface{}{
-						"type":    "stroke_sync",
-						"payload": json.RawMessage(strokesBytes),
-					})
-					c.Room.Broadcast <- syncMsg
-				}
+				c.Room.AdvanceTurnLocked()
 			}
 			c.Room.mu.Unlock()
 			go c.Room.BroadcastState()
@@ -333,91 +370,18 @@ func (c *Client) ReadPump() {
 						c.Room.State.JudgeSubmissions[c.UserID] = scorePayload.Score
 					}
 
-					// Count unique connected judges (atomic, deduplicated by UserID)
-					uniqueJudges := make(map[string]bool)
-					for client := range c.Room.Clients {
-						if client.Role == "judge" && client.UserID != "" {
-							uniqueJudges[client.UserID] = true
-						}
-					}
-					totalJudgesCount := len(uniqueJudges)
+					// Count unique present judges (atomic, deduplicated by UserID)
+					totalJudgesCount := c.Room.countActiveJudgesLocked()
 
-					// When all judges have submitted their rating, compute the mean score and advance
+					// When all judges have submitted their rating, compute the mean score and advance immediately
 					if len(c.Room.State.JudgeSubmissions) >= totalJudgesCount && totalJudgesCount > 0 {
-						sum := 0
-						for _, sc := range c.Room.State.JudgeSubmissions {
-							sum += sc
-						}
-						meanScore := (sum + len(c.Room.State.JudgeSubmissions)/2) / len(c.Room.State.JudgeSubmissions)
-						c.Room.Scores[c.Room.State.ActiveTeam] += meanScore
-						c.Room.State.LastMeanScore = meanScore
-
-						// Clear strokes for the next team's new word
-						c.Room.Strokes = []models.Stroke{}
-						if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
-							go func(rid string) {
-								ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-								defer cancel()
-								_ = c.Room.RedisClient.ClearStrokes(ctx, rid)
-							}(c.Room.ID)
-						}
-
-						if c.Room.State.ActiveTeam == "teamA" {
-							// Team Alpha finished. Now Team Beta draws Word 2!
-							c.Room.State.ActiveTeam = "teamB"
-							c.Room.State.Status = "playing"
-							c.Room.State.JudgeSubmissions = make(map[string]int)
-
-							teamBOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamB")
-							c.Room.State.TeamBOrder = teamBOrder
-							c.Room.State.TotalTeamSteps = len(teamBOrder)
-							c.Room.State.ActiveTeamStep = 0
-							if len(teamBOrder) > 0 {
-								c.Room.State.ActivePlayerID = teamBOrder[0]
-							} else {
-								c.Room.State.ActivePlayerID = ""
-							}
-
-							nextWord := words.GetRandomWord(c.Room.State.UsedWords)
-							c.Room.State.CurrentWord = nextWord
-							c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
-						} else {
-							// Team Beta finished Word 2! That completes 1 full round for both teams.
-							c.Room.State.CurrentRound++
-
-							if c.Room.State.CurrentRound > c.Room.Settings.MaxRounds {
-								// Match complete!
-								c.Room.State.Status = "finished"
-								go c.Room.UpdateStats()
-							} else {
-								// Next round begins with Team Alpha!
-								c.Room.State.ActiveTeam = "teamA"
-								c.Room.State.Status = "playing"
-								c.Room.State.JudgeSubmissions = make(map[string]int)
-
-								teamAOrder := getDeterministicTeamPlayers(c.Room.Clients, "teamA")
-								c.Room.State.TeamAOrder = teamAOrder
-								c.Room.State.TotalTeamSteps = len(teamAOrder)
-								c.Room.State.ActiveTeamStep = 0
-								if len(teamAOrder) > 0 {
-									c.Room.State.ActivePlayerID = teamAOrder[0]
-								} else {
-									c.Room.State.ActivePlayerID = ""
-								}
-
-								nextWord := words.GetRandomWord(c.Room.State.UsedWords)
-								c.Room.State.CurrentWord = nextWord
-								c.Room.State.UsedWords = append(c.Room.State.UsedWords, nextWord)
-							}
-						}
-
+						c.Room.FinalizeJudgingLocked()
 						c.Room.mu.Unlock()
 
 						// Broadcast clear canvas so the board is clean for the new team's word
 						clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
 						c.Room.Broadcast <- clearCanvasMsg
 						go c.Room.BroadcastState()
-						// CRITICAL FIX: No return here! Loop continues reading websocket messages!
 					} else {
 						c.Room.mu.Unlock()
 						go c.Room.BroadcastState()

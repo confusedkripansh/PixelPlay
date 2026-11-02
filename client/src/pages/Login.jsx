@@ -102,6 +102,9 @@ const Login = () => {
                 const data = await res.json();
                 if (data.status === 'success') {
                   localStorage.setItem('pixel_user', JSON.stringify(data.user));
+                  if (data.token) {
+                    localStorage.setItem('pixel_token', data.token);
+                  }
                   navigate('/lobby');
                 } else {
                   setErrorMessage(data.error || "Login rejected by server.");

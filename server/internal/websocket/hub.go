@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket" // The standard third-party library for WebSockets in Go.
 	"github.com/pixel1000/server/internal/models"
 	"github.com/pixel1000/server/internal/platform/cache"
+	"github.com/pixel1000/server/internal/platform/words"
 	"github.com/pixel1000/server/internal/services"
 )
 
@@ -65,6 +66,12 @@ type Room struct {
 	TeamATurnCount int
 	TeamBTurnCount int
 
+	RoleAssignments          map[string]string // Persistent role mapping: UserID -> "judge" | "teamA" | "teamB"
+	JudgingSessionID         int64             // Unique timestamp ID for current judging session
+	EmptyJudgeWatchdogActive bool              // Ensures only one 60s judge watchdog runs at a time
+	EmptyTeamAWatchdogActive bool              // Ensures only one 60s teamA watchdog runs at a time
+	EmptyTeamBWatchdogActive bool              // Ensures only one 60s teamB watchdog runs at a time
+
 	// mu is a Mutex (Mutual Exclusion lock). Because multiple Goroutines (players) can try to change the room state
 	// at the exact same millisecond, we call "mu.Lock()" before making a change, and "mu.Unlock()" after.
 	mu sync.Mutex
@@ -80,16 +87,18 @@ func NewRoom(id string, userService services.UserService, redisClient *cache.Red
 		LocalBroadcast: make(chan []byte, 256),
 		Register:       make(chan *Client),
 		Unregister:     make(chan *Client),
+		RoleAssignments: make(map[string]string),
 		State: models.GameState{
 			Status:       "lobby",
 			CurrentRound: 0,
 			UsedWords:    []string{},
 		},
 		Settings: models.RoomSettings{
-			MaxRounds:        3,
-			Mode:             "round_limit",
-			TimeLimitSeconds: 60,
-			InkLimit:         1000,
+			MaxRounds:          3,
+			Mode:               "round_limit",
+			TimeLimitSeconds:   60,
+			InkLimit:           1000,
+			JudgingTimeSeconds: 40,
 		},
 		Scores:      map[string]int{"teamA": 0, "teamB": 0},
 		Strokes:     []models.Stroke{},
@@ -184,11 +193,13 @@ func (r *Room) BroadcastState() {
 		}
 		_ = r.RedisClient.SetRoomState(context.Background(), r.ID, cached, 2*time.Hour)
 
-		// If this is a public room (no password), update its entry in the global feed
-		if r.Password == "" {
+		// If this is an active public room (no password and not finished), update its entry in the global feed.
+		// If the room finished, terminated, or has 0 players, purge it immediately from Redis!
+		totalPlayers := len(r.Clients) + len(r.Disconnected)
+		if r.Password == "" && state.Status != "finished" && state.Status != "terminated" && totalPlayers > 0 {
 			info := PublicRoomInfo{
 				RoomID:      r.ID,
-				PlayerCount: len(r.Clients) + len(r.Disconnected),
+				PlayerCount: totalPlayers,
 				Status:      state.Status,
 				TimeLimit:   r.Settings.TimeLimitSeconds,
 				InkLimit:    r.Settings.InkLimit,
@@ -242,8 +253,7 @@ func (r *Room) Run() {
 			// ATOMIC PRESENCE: Remove any prior connection for this UserID from r.Clients
 			for existingClient := range r.Clients {
 				if existingClient.UserID == client.UserID {
-					// Inherit prior assigned role so refresh preserves their team/judge assignment!
-					if client.Role == "" || client.Role == "teamA" {
+					if existingClient.Role != "" {
 						client.Role = existingClient.Role
 					}
 					delete(r.Clients, existingClient)
@@ -253,11 +263,21 @@ func (r *Room) Run() {
 			}
 			// Check if this player is returning within their reconnection grace period!
 			if oldClient, reconnected := r.Disconnected[client.UserID]; reconnected {
-				if client.Role == "" || client.Role == "teamA" {
+				if oldClient.Role != "" {
 					client.Role = oldClient.Role
 				}
 				delete(r.Disconnected, client.UserID)
 				log.Printf("Player %s successfully reconnected to room %s within grace period!", client.UserID, r.ID)
+			}
+
+			// ROLE PRESERVATION: Strictly check persistent role mapping
+			if assignedRole, ok := r.RoleAssignments[client.UserID]; ok && assignedRole != "" {
+				client.Role = assignedRole
+			} else {
+				if client.Role == "" {
+					client.Role = "teamA"
+				}
+				r.RoleAssignments[client.UserID] = client.Role
 			}
 			r.Clients[client] = true
 
@@ -333,6 +353,24 @@ func (r *Room) Run() {
 								r.Terminate("The room owner has left. The room has been terminated.")
 								return
 							}
+
+							// If the room has become completely empty, terminate it!
+							if len(r.Clients) == 0 && len(r.Disconnected) == 0 {
+								r.mu.Unlock()
+								log.Printf("Room %s is now empty. Terminating room.", r.ID)
+								r.Terminate("All players have left the room.")
+								return
+							}
+
+							// Check if essential roles became empty
+							r.triggerRoleWatchdogsLocked()
+
+							// If the disconnected player was the active drawer, advance the turn so the team never gets stuck!
+							if r.State.Status == "playing" && r.State.ActivePlayerID == targetUID {
+								log.Printf("Active drawer %s disconnected permanently. Advancing turn.", targetUID)
+								r.AdvanceTurnLocked()
+							}
+
 							r.mu.Unlock()
 							log.Printf("Player %s grace period expired. Removed from room %s.", targetUID, r.ID)
 							r.BroadcastState()
@@ -343,6 +381,7 @@ func (r *Room) Run() {
 					}(uid, isAdmin)
 				}
 			}
+			r.triggerRoleWatchdogsLocked()
 			r.mu.Unlock()
 			go r.BroadcastState()
 
@@ -441,6 +480,282 @@ func (r *Room) Terminate(reason string) {
 	}
 }
 
+// countActiveJudgesLocked counts unique judges actively connected to the room.
+func (r *Room) countActiveJudgesLocked() int {
+	seen := make(map[string]bool)
+	count := 0
+	for c := range r.Clients {
+		if c.Role == "judge" && c.UserID != "" && !seen[c.UserID] {
+			seen[c.UserID] = true
+			count++
+		}
+	}
+	return count
+}
+
+// countActiveTeamLocked counts unique players on a given team actively connected to the room.
+func (r *Room) countActiveTeamLocked(team string) int {
+	seen := make(map[string]bool)
+	count := 0
+	for c := range r.Clients {
+		if c.Role == team && c.UserID != "" && !seen[c.UserID] {
+			seen[c.UserID] = true
+			count++
+		}
+	}
+	return count
+}
+
+// triggerRoleWatchdogsLocked starts 60-second self-termination watchdogs if any essential role is empty.
+// MUST be called while holding r.mu.Lock().
+func (r *Room) triggerRoleWatchdogsLocked() {
+	if r.State.Status != "playing" && r.State.Status != "judging" {
+		return
+	}
+
+	// 1. Judge Watchdog: Terminate if room has no referee for >60 seconds
+	if r.countActiveJudgesLocked() == 0 && !r.EmptyJudgeWatchdogActive {
+		r.EmptyJudgeWatchdogActive = true
+		go func() {
+			time.Sleep(60 * time.Second)
+			r.mu.Lock()
+			r.EmptyJudgeWatchdogActive = false
+			shouldTerminate := (r.State.Status == "playing" || r.State.Status == "judging") && r.countActiveJudgesLocked() == 0
+			r.mu.Unlock()
+
+			if shouldTerminate {
+				log.Printf("Room %s: No referee present for >60 seconds during match. Auto-terminating.", r.ID)
+				r.Terminate("No referee has been present in the room for over 60 seconds. Match terminated.")
+			}
+		}()
+	}
+
+	// 2. Team Alpha Watchdog: Terminate if Team Alpha is completely empty for >60 seconds
+	if r.countActiveTeamLocked("teamA") == 0 && !r.EmptyTeamAWatchdogActive {
+		r.EmptyTeamAWatchdogActive = true
+		go func() {
+			time.Sleep(60 * time.Second)
+			r.mu.Lock()
+			r.EmptyTeamAWatchdogActive = false
+			shouldTerminate := (r.State.Status == "playing" || r.State.Status == "judging") && r.countActiveTeamLocked("teamA") == 0
+			r.mu.Unlock()
+
+			if shouldTerminate {
+				log.Printf("Room %s: Team Blue has been empty for >60 seconds during match. Auto-terminating.", r.ID)
+				r.Terminate("Team Blue has been empty for over 60 seconds. Match terminated.")
+			}
+		}()
+	}
+
+	// 3. Team Beta Watchdog: Terminate if Team Beta is completely empty for >60 seconds
+	if r.countActiveTeamLocked("teamB") == 0 && !r.EmptyTeamBWatchdogActive {
+		r.EmptyTeamBWatchdogActive = true
+		go func() {
+			time.Sleep(60 * time.Second)
+			r.mu.Lock()
+			r.EmptyTeamBWatchdogActive = false
+			shouldTerminate := (r.State.Status == "playing" || r.State.Status == "judging") && r.countActiveTeamLocked("teamB") == 0
+			r.mu.Unlock()
+
+			if shouldTerminate {
+				log.Printf("Room %s: Team Red has been empty for >60 seconds during match. Auto-terminating.", r.ID)
+				r.Terminate("Team Red has been empty for over 60 seconds. Match terminated.")
+			}
+		}()
+	}
+}
+
+// AdvanceTurnLocked advances the turn step within the active team or transitions to judging.
+// MUST be called while holding r.mu.Lock().
+func (r *Room) AdvanceTurnLocked() {
+	var activeTeamOrder []string
+	if r.State.ActiveTeam == "teamA" {
+		activeTeamOrder = r.State.TeamAOrder
+	} else {
+		activeTeamOrder = r.State.TeamBOrder
+	}
+
+	r.State.TotalTeamSteps = len(activeTeamOrder)
+	r.State.ActiveTeamStep++
+
+	if r.State.ActiveTeamStep < len(activeTeamOrder) {
+		// Advance to next player in team
+		r.State.ActivePlayerID = activeTeamOrder[r.State.ActiveTeamStep]
+	} else {
+		// All players on team have finished drawing this word -> transition to judging!
+		r.State.Status = "judging"
+		r.State.JudgeSubmissions = make(map[string]int)
+
+		duration := r.Settings.JudgingTimeSeconds
+		if duration < 40 {
+			duration = 40
+		}
+		r.State.JudgingDuration = duration
+		r.State.JudgingDeadline = time.Now().Add(time.Duration(duration) * time.Second).UnixMilli()
+
+		sessionID := time.Now().UnixNano()
+		r.JudgingSessionID = sessionID
+		currentRound := r.State.CurrentRound
+		activeTeam := r.State.ActiveTeam
+
+		// Broadcast stroke_sync to all clients so judges immediately have 100% of the completed drawing
+		strokesBytes, _ := json.Marshal(r.Strokes)
+		syncMsg, _ := json.Marshal(map[string]interface{}{
+			"type":    "stroke_sync",
+			"payload": json.RawMessage(strokesBytes),
+		})
+		select {
+		case r.Broadcast <- syncMsg:
+		default:
+		}
+
+		// Check if any role is currently empty
+		r.triggerRoleWatchdogsLocked()
+
+		// Launch the dynamic judging rating timer
+		go r.startJudgingTimer(sessionID, currentRound, activeTeam, duration)
+	}
+}
+
+// startJudgingTimer waits for durationSec. If any judge has not submitted a rating,
+// it auto-allots a default score of 5, finalizes judging, and advances the match.
+func (r *Room) startJudgingTimer(sessionID int64, round int, team string, durationSec int) {
+	time.Sleep(time.Duration(durationSec) * time.Second)
+
+	r.mu.Lock()
+	// If the judging session has already finished or status changed, no-op
+	if r.JudgingSessionID != sessionID || r.State.Status != "judging" || r.State.CurrentRound != round || r.State.ActiveTeam != team {
+		r.mu.Unlock()
+		return
+	}
+
+	log.Printf("Judging timer (%ds) expired in room %s. Defaulting missing judges to 5.", durationSec, r.ID)
+
+	if r.State.JudgeSubmissions == nil {
+		r.State.JudgeSubmissions = make(map[string]int)
+	}
+
+	// Gather all designated judges
+	judgeSet := make(map[string]bool)
+	for uid, role := range r.RoleAssignments {
+		if role == "judge" {
+			judgeSet[uid] = true
+		}
+	}
+	for c := range r.Clients {
+		if c.Role == "judge" && c.UserID != "" {
+			judgeSet[c.UserID] = true
+		}
+	}
+	for _, c := range r.Disconnected {
+		if c.Role == "judge" && c.UserID != "" {
+			judgeSet[c.UserID] = true
+		}
+	}
+
+	// For any judge who hasn't submitted a rating, allot default score of 5
+	for jID := range judgeSet {
+		if _, voted := r.State.JudgeSubmissions[jID]; !voted {
+			r.State.JudgeSubmissions[jID] = 5
+			log.Printf("Room %s: Judge %s timed out. Auto-allotted score 5.", r.ID, jID)
+		}
+	}
+
+	// Fallback if no judges were in the set
+	if len(r.State.JudgeSubmissions) == 0 {
+		r.State.JudgeSubmissions["system_default"] = 5
+	}
+
+	r.FinalizeJudgingLocked()
+	r.mu.Unlock() // Release lock immediately before broadcasting
+
+	// Broadcast clear canvas so the board is clean for the new team's word
+	clearCanvasMsg, _ := json.Marshal(map[string]string{"type": "clear_canvas"})
+	select {
+	case r.Broadcast <- clearCanvasMsg:
+	default:
+	}
+	go r.BroadcastState()
+}
+
+// FinalizeJudgingLocked tallies judge ratings (defaulting unsubmitted judges to 5),
+// updates team scores, clears strokes, and transitions to the next team or round.
+// MUST be called while holding r.mu.Lock().
+func (r *Room) FinalizeJudgingLocked() {
+	r.JudgingSessionID = 0
+	r.State.JudgingDeadline = 0
+
+	sum := 0
+	for _, sc := range r.State.JudgeSubmissions {
+		sum += sc
+	}
+	meanScore := 5
+	if len(r.State.JudgeSubmissions) > 0 {
+		meanScore = (sum + len(r.State.JudgeSubmissions)/2) / len(r.State.JudgeSubmissions)
+	}
+	r.Scores[r.State.ActiveTeam] += meanScore
+	r.State.LastMeanScore = meanScore
+
+	// Clear strokes for the next team's new word
+	r.Strokes = []models.Stroke{}
+	if r.RedisClient != nil && r.RedisClient.IsAvailable() {
+		go func(rid string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = r.RedisClient.ClearStrokes(ctx, rid)
+		}(r.ID)
+	}
+
+	if r.State.ActiveTeam == "teamA" {
+		// Team Alpha finished. Now Team Beta draws Word 2!
+		r.State.ActiveTeam = "teamB"
+		r.State.Status = "playing"
+		r.State.JudgeSubmissions = make(map[string]int)
+
+		teamBOrder := getDeterministicTeamPlayers(r, "teamB")
+		r.State.TeamBOrder = teamBOrder
+		r.State.TotalTeamSteps = len(teamBOrder)
+		r.State.ActiveTeamStep = 0
+		if len(teamBOrder) > 0 {
+			r.State.ActivePlayerID = teamBOrder[0]
+		} else {
+			r.State.ActivePlayerID = ""
+		}
+
+		nextWord := words.GetRandomWord(r.State.UsedWords)
+		r.State.CurrentWord = nextWord
+		r.State.UsedWords = append(r.State.UsedWords, nextWord)
+	} else {
+		// Team Beta finished Word 2! That completes 1 full round for both teams.
+		r.State.CurrentRound++
+
+		if r.State.CurrentRound > r.Settings.MaxRounds {
+			// Match complete!
+			r.State.Status = "finished"
+			go r.UpdateStats()
+		} else {
+			// Next round begins with Team Alpha!
+			r.State.ActiveTeam = "teamA"
+			r.State.Status = "playing"
+			r.State.JudgeSubmissions = make(map[string]int)
+
+			teamAOrder := getDeterministicTeamPlayers(r, "teamA")
+			r.State.TeamAOrder = teamAOrder
+			r.State.TotalTeamSteps = len(teamAOrder)
+			r.State.ActiveTeamStep = 0
+			if len(teamAOrder) > 0 {
+				r.State.ActivePlayerID = teamAOrder[0]
+			} else {
+				r.State.ActivePlayerID = ""
+			}
+
+			nextWord := words.GetRandomWord(r.State.UsedWords)
+			r.State.CurrentWord = nextWord
+			r.State.UsedWords = append(r.State.UsedWords, nextWord)
+		}
+	}
+}
+
 // Hub manages all active Rooms on this server instance.
 type Hub struct {
 	Rooms       map[string]*Room
@@ -479,7 +794,10 @@ func (h *Hub) GetPublicRooms() []PublicRoomInfo {
 			for _, raw := range rawMap {
 				var info PublicRoomInfo
 				if json.Unmarshal(raw, &info) == nil {
-					list = append(list, info)
+					// Strictly exclude finished, terminated, or empty rooms from the global discovery feed
+					if info.Status != "finished" && info.Status != "terminated" && info.PlayerCount > 0 {
+						list = append(list, info)
+					}
 				}
 			}
 			return list
@@ -492,10 +810,11 @@ func (h *Hub) GetPublicRooms() []PublicRoomInfo {
 	var list []PublicRoomInfo
 	for _, room := range h.Rooms {
 		room.mu.Lock()
-		if room.Password == "" {
+		totalPlayers := len(room.Clients) + len(room.Disconnected)
+		if room.Password == "" && room.State.Status != "finished" && room.State.Status != "terminated" && totalPlayers > 0 {
 			list = append(list, PublicRoomInfo{
 				RoomID:      room.ID,
-				PlayerCount: len(room.Clients) + len(room.Disconnected),
+				PlayerCount: totalPlayers,
 				Status:      room.State.Status,
 				TimeLimit:   room.Settings.TimeLimitSeconds,
 				InkLimit:    room.Settings.InkLimit,

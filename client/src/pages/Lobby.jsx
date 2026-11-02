@@ -67,11 +67,20 @@ const Lobby = () => {
     localStorage.setItem('pixel_user', JSON.stringify(updatedUser));
 
     try {
-      await fetch(`${API_BASE_URL}/api/user/update/${user.googleId}`, {
+      const token = localStorage.getItem('pixel_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE_URL}/api/user/update/${user.googleId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ name: newName.trim(), avatarUrl: user.avatarUrl || '' })
       });
+      const data = await res.json();
+      if (data.status === 'success' && data.user) {
+        localStorage.setItem('pixel_user', JSON.stringify(data.user));
+        setUser(data.user);
+      }
     } catch (e) {
       console.warn("Could not reach backend to sync username:", e);
     } finally {

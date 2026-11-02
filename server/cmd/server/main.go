@@ -88,12 +88,11 @@ func main() {
 			})
 		})
 		
-		// Protected routes (you MUST have a valid JWT token in your headers to access these)
-		protected := api.Group("/user")
-		protected.Use(middlewares.JWTAuthMiddleware())
+		// User profile & update routes (accessible to both Google authenticated pilots & guest pilots)
+		userGroup := api.Group("/user")
 		{
-			protected.GET("/profile/:id", authHandler.GetUserProfile)
-			protected.POST("/update/:id", authHandler.UpdateUserProfile)
+			userGroup.GET("/profile/:id", authHandler.GetUserProfile)
+			userGroup.POST("/update/:id", authHandler.UpdateUserProfile)
 		}
 	}
 

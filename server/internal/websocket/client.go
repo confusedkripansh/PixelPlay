@@ -166,22 +166,26 @@ func (c *Client) ReadPump() {
 			var stroke models.Stroke
 			if err := json.Unmarshal(wsMsg.Payload, &stroke); err == nil {
 				c.Room.Strokes = append(c.Room.Strokes, stroke)
+				c.Room.PendingStrokes = append(c.Room.PendingStrokes, stroke)
+
+				// Buffer safety ceiling: flush batch to Redis if drawer draws an ultra-long line without lifting mouse
+				if len(c.Room.PendingStrokes) >= 50 {
+					c.Room.FlushPendingStrokesLocked()
+				}
 				c.Room.mu.Unlock()
 
-				// 1. Send the stroke to everyone immediately for buttery-smooth rendering (<1ms latency)
+				// 1. Live Streaming: Send the stroke immediately to all local clients and Redis Pub/Sub (<1ms latency)
+				// Note: Redis RPUSH writes are decoupled and performed in batches on stroke_end!
 				c.Room.Broadcast <- message
-
-				// 2. Record stroke to Redis asynchronously so the read loop NEVER lags
-				if c.Room.RedisClient != nil && c.Room.RedisClient.IsAvailable() {
-					go func(st models.Stroke) {
-						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-						defer cancel()
-						_ = c.Room.RedisClient.AppendStroke(ctx, c.Room.ID, st)
-					}(stroke)
-				}
 			} else {
 				c.Room.mu.Unlock()
 			}
+		} else if wsMsg.Type == "stroke_end" {
+			c.Room.mu.Lock()
+			if c.UserID == c.Room.State.ActivePlayerID {
+				c.Room.FlushPendingStrokesLocked()
+			}
+			c.Room.mu.Unlock()
 		} else if wsMsg.Type == "switch_role" {
 			var rolePayload struct {
 				Role string `json:"role"`

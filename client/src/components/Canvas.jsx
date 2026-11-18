@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } f
 const Canvas = forwardRef(({ 
   isMyTurn, 
   onPixelDraw, 
+  onStrokeEnd,
   onEndTurn,
   pixelsPerTurn = 1000
 }, ref) => {
@@ -147,6 +148,9 @@ const Canvas = forwardRef(({
     if (distance < 1) return;
 
     if (inkUsed + distance > pixelsPerTurn) {
+      if (isDrawing.current && onStrokeEnd) {
+        onStrokeEnd();
+      }
       isDrawing.current = false;
       lastPos.current = null;
       return;
@@ -171,8 +175,13 @@ const Canvas = forwardRef(({
 
   const stopDrawing = (e) => {
     if (e && e.type === 'touchend') e.preventDefault();
-    isDrawing.current = false;
-    lastPos.current = null;
+    if (isDrawing.current) {
+      isDrawing.current = false;
+      lastPos.current = null;
+      if (onStrokeEnd) {
+        onStrokeEnd();
+      }
+    }
   };
 
   // Vibrant Skribbl.io 12-Color Palette

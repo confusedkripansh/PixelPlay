@@ -348,6 +348,12 @@ const Room = () => {
     }
   };
 
+  const handleStrokeEnd = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'stroke_end' }));
+    }
+  };
+
   const handleSubmitScore = (score) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'submit_score', payload: { score } }));
@@ -827,6 +833,7 @@ const Room = () => {
                 ref={canvasRef}
                 isMyTurn={gameState === 'playing' && isDrawer} 
                 onPixelDraw={handlePixelDraw} 
+                onStrokeEnd={handleStrokeEnd}
                 onEndTurn={handleEndTurn}
                 pixelsPerTurn={serverState?.settings?.inkLimit || 1000}
               />

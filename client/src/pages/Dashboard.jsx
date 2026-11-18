@@ -26,6 +26,7 @@ const Dashboard = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(currentUser.name || 'Guest Player');
   const [editAvatar, setEditAvatar] = useState(currentUser.avatarUrl || '');
+  const [nameError, setNameError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -49,8 +50,20 @@ const Dashboard = () => {
             totalPoints: Math.max(data.stats.totalPoints || 0, localStats.totalPoints || 0)
           };
           setUserStats(mergedStats);
+
+          // Update currentUser & localStorage with fresh name, avatarUrl, stats, and createdAt from DB!
+          const freshUser = {
+            ...currentUser,
+            name: data.name || currentUser.name,
+            avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl,
+            stats: mergedStats,
+            createdAt: data.createdAt || currentUser.createdAt
+          };
+          setCurrentUser(freshUser);
+          localStorage.setItem('pixel_user', JSON.stringify(freshUser));
+
           if (data.name) setEditName(data.name);
-          if (data.avatarUrl) setEditAvatar(data.avatarUrl);
+          if (data.avatarUrl !== undefined) setEditAvatar(data.avatarUrl);
         } else {
           setUserStats(localStats);
         }
@@ -62,13 +75,23 @@ const Dashboard = () => {
   }, [navigate, currentUser.googleId]);
 
   const handleSaveProfile = async () => {
-    if (!editName.trim()) return;
+    const trimmedName = editName.trim();
+    if (trimmedName.length < 3 || trimmedName.length > 16) {
+      setNameError('Username must be between 3 and 16 characters');
+      return;
+    }
+    const validPattern = /^[a-zA-Z0-9 _-]+$/;
+    if (!validPattern.test(trimmedName)) {
+      setNameError('Can only contain letters, numbers, spaces, underscores, and hyphens');
+      return;
+    }
+    setNameError('');
     setIsSaving(true);
     setSaveSuccess(false);
 
     const updatedUser = { 
       ...currentUser, 
-      name: editName.trim(), 
+      name: trimmedName, 
       avatarUrl: editAvatar.trim() 
     };
 
@@ -86,7 +109,7 @@ const Dashboard = () => {
         method: 'POST',
         headers,
         body: JSON.stringify({ 
-          name: editName.trim(), 
+          name: trimmedName, 
           avatarUrl: editAvatar.trim() 
         })
       });
@@ -102,7 +125,7 @@ const Dashboard = () => {
           setSaveSuccess(false);
         }, 800);
       } else {
-        setIsEditing(false);
+        setNameError(data.error || 'Failed to update profile');
       }
     } catch (e) {
       console.error("Backend profile update fallback:", e);
@@ -129,6 +152,18 @@ const Dashboard = () => {
   const winRate = totalMatches > 0 ? Math.round((userStats.wins / totalMatches) * 100) : 0;
   const playerTier = Math.floor((userStats.experience || 0) / 100) + 1;
   const xpInTier = (userStats.experience || 0) % 100;
+
+  const formattedJoinDate = currentUser.createdAt ? (() => {
+    try {
+      const ms = typeof currentUser.createdAt === 'number' ? currentUser.createdAt : Number(currentUser.createdAt);
+      if (!isNaN(ms) && ms > 0) {
+        return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })() : null;
 
   return (
     <div className="app-container" style={{ padding: '2rem 1.5rem', maxWidth: '880px', margin: '0 auto' }}>
@@ -200,25 +235,40 @@ const Dashboard = () => {
           {isEditing ? (
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', color: '#c8d6e5', fontWeight: 800, marginBottom: '0.25rem' }}>
-                  NICKNAME
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                  <label style={{ fontSize: '0.75rem', color: '#c8d6e5', fontWeight: 800 }}>
+                    NICKNAME (3-16 CHARS)
+                  </label>
+                  <span style={{ fontSize: '0.7rem', color: editName.trim().length > 16 || (editName.trim().length > 0 && editName.trim().length < 3) ? '#ee5253' : '#8395a7', fontWeight: 800 }}>
+                    {editName.trim().length}/16
+                  </span>
+                </div>
                 <input 
                   type="text" 
                   value={editName} 
-                  onChange={e => setEditName(e.target.value)} 
+                  onChange={e => {
+                    setEditName(e.target.value);
+                    if (nameError) setNameError('');
+                  }} 
+                  minLength={3}
+                  maxLength={16}
                   placeholder="Enter name" 
                   style={{ 
                     width: '100%',
                     padding: '0.65rem', 
                     background: '#24375d', 
                     color: 'white', 
-                    border: '2px solid #feca57', 
+                    border: nameError ? '2px solid #ee5253' : '2px solid #feca57', 
                     borderRadius: '8px',
                     fontWeight: 900,
                     outline: 'none'
                   }} 
                 />
+                {nameError && (
+                  <span style={{ display: 'block', color: '#ee5253', fontSize: '0.7rem', fontWeight: 800, marginTop: '0.25rem' }}>
+                    {nameError}
+                  </span>
+                )}
               </div>
 
               <div>
@@ -230,6 +280,7 @@ const Dashboard = () => {
                   value={editAvatar} 
                   onChange={e => setEditAvatar(e.target.value)} 
                   placeholder="https://..." 
+                  maxLength={500}
                   style={{ 
                     width: '100%',
                     padding: '0.65rem', 
@@ -256,6 +307,7 @@ const Dashboard = () => {
                   onClick={() => {
                     setEditName(currentUser.name);
                     setEditAvatar(currentUser.avatarUrl);
+                    setNameError('');
                     setIsEditing(false);
                   }} 
                   style={{ flex: 1, padding: '0.55rem' }}
@@ -266,9 +318,14 @@ const Dashboard = () => {
             </div>
           ) : (
             <>
-              <h2 style={{ fontSize: '1.4rem', margin: '0.5rem 0 0.2rem', color: '#ffffff', textAlign: 'center' }}>
+              <h2 style={{ fontSize: '1.4rem', margin: '0.5rem 0 0.1rem', color: '#ffffff', textAlign: 'center' }}>
                 {currentUser.name}
               </h2>
+              {formattedJoinDate && (
+                <div style={{ fontSize: '0.75rem', color: '#8395a7', fontWeight: 700, marginBottom: '0.4rem' }}>
+                  Pilot since {formattedJoinDate}
+                </div>
+              )}
 
               {/* Progress to next level */}
               <div style={{ width: '100%', margin: '1rem 0' }}>

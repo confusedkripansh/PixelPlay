@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync" // sync gives us Mutexes, which act like "traffic lights" to stop two threads from crashing into each other.
 	"time"
 
@@ -191,7 +192,7 @@ func (r *Room) BroadcastState() {
 			State:    state,
 			Scores:   r.Scores,
 		}
-		_ = r.RedisClient.SetRoomState(context.Background(), r.ID, cached, 2*time.Hour)
+		_ = r.RedisClient.SetRoomState(context.Background(), r.ID, cached, 15*time.Minute)
 
 		// If this is an active public room (no password and not finished), update its entry in the global feed.
 		// If the room finished, terminated, or has 0 players, purge it immediately from Redis!
@@ -214,37 +215,10 @@ func (r *Room) BroadcastState() {
 	r.Broadcast <- msg
 }
 
-// Run is the central event loop for a Room. It coordinates local and distributed Redis Pub/Sub events.
+// Run is the central event loop for a Room. It coordinates local clients and broadcasts.
+// Note: Inbound cross-server Redis Pub/Sub events are multiplexed centrally via Hub.StartRedisPubSubMultiplexer,
+// saving Redis connection overhead (O(1) connection across all rooms instead of O(N)).
 func (r *Room) Run() {
-	// If Redis is active, subscribe to this room's Pub/Sub channel.
-	// Any server instance that publishes to this channel will have its message relayed to our local clients.
-	if r.RedisClient != nil && r.RedisClient.IsAvailable() {
-		channel := fmt.Sprintf("room:%s:events", r.ID)
-		pubsub := r.RedisClient.Subscribe(context.Background(), channel)
-		go func() {
-			defer pubsub.Close()
-			ch := pubsub.Channel()
-			for msg := range ch {
-				var env RedisEnvelope
-				if err := json.Unmarshal([]byte(msg.Payload), &env); err == nil && env.InstanceID != "" {
-					if env.InstanceID == serverInstanceID {
-						// Ignore self-echo: already delivered locally with 0ms delay
-						continue
-					}
-					select {
-					case r.LocalBroadcast <- env.Payload:
-					default:
-					}
-				} else {
-					select {
-					case r.LocalBroadcast <- []byte(msg.Payload):
-					default:
-					}
-				}
-			}
-		}()
-	}
-
 	for {
 		select {
 		// New client connected to this server
@@ -764,13 +738,67 @@ type Hub struct {
 	mu          sync.RWMutex
 }
 
-// NewHub initializes the Hub with optional Redis client.
+// NewHub initializes the Hub with optional Redis client and starts the cluster-wide Pub/Sub multiplexer.
 func NewHub(userService services.UserService, redisClient *cache.RedisClient) *Hub {
-	return &Hub{
+	hub := &Hub{
 		Rooms:       make(map[string]*Room),
 		UserService: userService,
 		RedisClient: redisClient,
 	}
+	hub.StartRedisPubSubMultiplexer()
+	return hub
+}
+
+// StartRedisPubSubMultiplexer maintains exactly ONE server-wide Redis connection
+// using PSUBSCRIBE to listen to all room events. This eliminates per-room connection
+// overhead while preserving full horizontal multi-server capability.
+func (h *Hub) StartRedisPubSubMultiplexer() {
+	if h.RedisClient == nil || !h.RedisClient.IsAvailable() {
+		return
+	}
+
+	pubsub := h.RedisClient.PSubscribe(context.Background(), "room:*:events")
+	go func() {
+		defer pubsub.Close()
+		ch := pubsub.Channel()
+		for msg := range ch {
+			if msg == nil {
+				continue
+			}
+			// Channel is formatted as "room:<roomID>:events"
+			parts := strings.Split(msg.Channel, ":")
+			if len(parts) != 3 || parts[0] != "room" || parts[2] != "events" {
+				continue
+			}
+			roomID := parts[1]
+
+			var env RedisEnvelope
+			var payload []byte
+
+			if err := json.Unmarshal([]byte(msg.Payload), &env); err == nil && env.InstanceID != "" {
+				if env.InstanceID == serverInstanceID {
+					// Ignore self-echo: already delivered locally with 0ms delay
+					continue
+				}
+				payload = env.Payload
+			} else {
+				payload = []byte(msg.Payload)
+			}
+
+			// Route directly to local room if managed on this server instance
+			h.mu.RLock()
+			room, exists := h.Rooms[roomID]
+			h.mu.RUnlock()
+
+			if exists && room != nil {
+				select {
+				case room.LocalBroadcast <- payload:
+				default:
+				}
+			}
+		}
+	}()
+	log.Println("Redis: Multiplexed PubSub listener initialized on 'room:*:events' (1 connection total)")
 }
 
 // RemoveRoom permanently removes a room from Hub memory.

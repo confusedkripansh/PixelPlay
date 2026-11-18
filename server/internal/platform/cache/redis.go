@@ -25,12 +25,15 @@ func NewRedisClient(addr, password string, db int) (*RedisClient, error) {
 	}
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password, // No password by default
-		DB:           db,       // Default DB 0
-		DialTimeout:  3 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
+		Addr:           addr,
+		Password:       password, // No password by default
+		DB:             db,       // Default DB 0
+		PoolSize:       10,       // Cap connection pool to preserve free-tier limits
+		MinIdleConns:   2,        // Keep 2 warm idle connections
+		MaxActiveConns: 12,       // Hard ceiling to guarantee under 20-connection threshold
+		DialTimeout:    3 * time.Second,
+		ReadTimeout:    3 * time.Second,
+		WriteTimeout:   3 * time.Second,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -83,6 +86,15 @@ func (r *RedisClient) Subscribe(ctx context.Context, channel string) *redis.PubS
 	return r.Client.Subscribe(ctx, channel)
 }
 
+// PSubscribe listens to channels matching a glob-style pattern (e.g. "room:*:events").
+// Enables a single O(1) connection multiplexer across the entire server cluster.
+func (r *RedisClient) PSubscribe(ctx context.Context, pattern string) *redis.PubSub {
+	if !r.IsAvailable() {
+		return nil
+	}
+	return r.Client.PSubscribe(ctx, pattern)
+}
+
 // SetRoomState caches the current room state (scores, round, current word, status) in Redis with a TTL.
 func (r *RedisClient) SetRoomState(ctx context.Context, roomID string, state interface{}, ttl time.Duration) error {
 	if !r.IsAvailable() {
@@ -129,8 +141,8 @@ func (r *RedisClient) AppendStroke(ctx context.Context, roomID string, stroke in
 	if err := r.Client.RPush(ctx, key, data).Err(); err != nil {
 		return err
 	}
-	// Keep strokes alive for 2 hours of inactivity
-	r.Client.Expire(ctx, key, 2*time.Hour)
+	// Keep strokes alive for 15 minutes of inactivity (optimized for 30MB Redis memory limit)
+	r.Client.Expire(ctx, key, 15*time.Minute)
 	return nil
 }
 

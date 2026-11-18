@@ -60,9 +60,18 @@ const Lobby = () => {
   }, []);
 
   const handleSaveUsername = async () => {
-    if (!newName.trim()) return;
+    const trimmed = newName.trim();
+    if (trimmed.length < 3 || trimmed.length > 16) {
+      alert("Username must be between 3 and 16 characters.");
+      return;
+    }
+    const validPattern = /^[a-zA-Z0-9 _-]+$/;
+    if (!validPattern.test(trimmed)) {
+      alert("Username can only contain letters, numbers, spaces, underscores, and hyphens.");
+      return;
+    }
     setIsSavingName(true);
-    const updatedUser = { ...user, name: newName.trim() };
+    const updatedUser = { ...user, name: trimmed };
     setUser(updatedUser);
     localStorage.setItem('pixel_user', JSON.stringify(updatedUser));
 
@@ -74,7 +83,7 @@ const Lobby = () => {
       const res = await fetch(`${API_BASE_URL}/api/user/update/${user.googleId}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ name: newName.trim(), avatarUrl: user.avatarUrl || '' })
+        body: JSON.stringify({ name: trimmed, avatarUrl: user.avatarUrl || '' })
       });
       const data = await res.json();
       if (data.status === 'success' && data.user) {
@@ -156,6 +165,9 @@ const Lobby = () => {
                 type="text" 
                 value={newName} 
                 onChange={(e) => setNewName(e.target.value)}
+                minLength={3}
+                maxLength={16}
+                placeholder="3-16 chars"
                 style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.9rem', fontWeight: 800, width: '130px', outline: 'none' }}
                 autoFocus
               />

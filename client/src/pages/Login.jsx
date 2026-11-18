@@ -11,10 +11,22 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleGuestLogin = () => {
+    const trimmed = inGameName.trim();
+    if (trimmed.length > 0) {
+      if (trimmed.length < 3 || trimmed.length > 16) {
+        setErrorMessage("Nickname must be between 3 and 16 characters.");
+        return;
+      }
+      const validPattern = /^[a-zA-Z0-9 _-]+$/;
+      if (!validPattern.test(trimmed)) {
+        setErrorMessage("Nickname can only contain letters, numbers, spaces, underscores, and hyphens.");
+        return;
+      }
+    }
     const guestId = 'guest-' + Math.floor(100000 + Math.random() * 900000);
     const guestUser = {
       googleId: guestId,
-      name: inGameName.trim() || `Player_${guestId.slice(-4)}`,
+      name: trimmed || `Player_${guestId.slice(-4)}`,
       avatarUrl: '',
       stats: { wins: 0, losses: 0, experience: 0, totalPoints: 0 }
     };
@@ -63,13 +75,22 @@ const Login = () => {
         )}
 
         <div style={{ marginBottom: '1.25rem', textAlign: 'left' }}>
-          <label style={{ color: '#c8d6e5', display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem', fontWeight: 800 }}>
-            NICKNAME (OPTIONAL)
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+            <label style={{ color: '#c8d6e5', fontSize: '0.8rem', fontWeight: 800 }}>
+              NICKNAME (OPTIONAL, 3-16 CHARS)
+            </label>
+            <span style={{ fontSize: '0.75rem', color: inGameName.trim().length > 16 ? '#ee5253' : '#8395a7', fontWeight: 800 }}>
+              {inGameName.trim().length}/16
+            </span>
+          </div>
           <input 
             type="text" 
             value={inGameName}
-            onChange={(e) => setInGameName(e.target.value)}
+            onChange={(e) => {
+              setInGameName(e.target.value);
+              if (errorMessage) setErrorMessage('');
+            }}
+            maxLength={16}
             placeholder="e.g. MasterArtist"
             style={{ 
               width: '100%', 

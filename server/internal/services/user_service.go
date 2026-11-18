@@ -78,7 +78,7 @@ func (s *userService) UpsertGoogleUser(ctx context.Context, googleId, name, avat
 				Experience:  0,
 				TotalPoints: 0,
 			},
-			"createdAt": time.Now(),
+			"createdAt": time.Now().UnixMilli(),
 		},
 	}
 	opts := options.Update().SetUpsert(true)
@@ -113,7 +113,7 @@ func (s *userService) UpdateUserProfile(ctx context.Context, googleId, name, ava
 			"avatarUrl": avatarUrl,
 		},
 		"$setOnInsert": bson.M{
-			"createdAt": time.Now(),
+			"createdAt": time.Now().UnixMilli(),
 			"stats": models.UserStats{
 				Wins:        0,
 				Losses:      0,
@@ -152,7 +152,7 @@ func (s *userService) UpdateGameStats(ctx context.Context, googleId string, stat
 	update := bson.M{
 		"$inc": incFields,
 		"$setOnInsert": bson.M{
-			"createdAt": time.Now(),
+			"createdAt": time.Now().UnixMilli(),
 		},
 	}
 

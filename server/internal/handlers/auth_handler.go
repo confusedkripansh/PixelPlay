@@ -2,14 +2,31 @@ package handlers
 
 import (
 	"context" // Used for passing request-scoped data and cancellation signals to the Service layer.
+	"fmt"
 	"net/http" // Provides standard HTTP status codes (like http.StatusOK, http.StatusBadRequest).
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin" // Gin is our web framework. It handles routing and HTTP requests.
 	"github.com/golang-jwt/jwt/v5" // A library to parse JSON Web Tokens (JWTs) sent by Google.
 	"github.com/pixel1000/server/internal/services" // Our custom business logic layer.
 )
+
+var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9 _-]+$`)
+
+// validateUsername enforces 3-16 character length, trimmed, alphanumeric + spaces/underscores/hyphens
+func validateUsername(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if len(trimmed) < 3 || len(trimmed) > 16 {
+		return "", fmt.Errorf("username must be between 3 and 16 characters")
+	}
+	if !validUsernameRegex.MatchString(trimmed) {
+		return "", fmt.Errorf("username can only contain letters, numbers, spaces, underscores, and hyphens")
+	}
+	return trimmed, nil
+}
 
 // AuthHandler is a struct (an object) that will hold all the dependencies this handler needs.
 // In this case, it holds a reference to the UserService so it can talk to the database.
@@ -63,7 +80,12 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 	googleId, _ := claims["sub"].(string)
 	name, _ := claims["name"].(string)
 	if req.InGameName != "" {
-		name = req.InGameName // Override their Google name if they typed a custom one in our app.
+		validatedName, err := validateUsername(req.InGameName)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		name = validatedName // Override their Google name if they typed a valid custom one in our app.
 	}
 	
 	avatarUrl, _ := claims["picture"].(string)
@@ -149,8 +171,21 @@ func (h *AuthHandler) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
+	// Validate and sanitize username constraints
+	validatedName, err := validateUsername(req.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Name = validatedName
+	req.AvatarURL = strings.TrimSpace(req.AvatarURL)
+	if len(req.AvatarURL) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Avatar URL is too long (max 500 characters)"})
+		return
+	}
+
 	// Ask the Service layer to update the database.
-	err := h.userService.UpdateUserProfile(context.Background(), googleId, req.Name, req.AvatarURL)
+	err = h.userService.UpdateUserProfile(context.Background(), googleId, req.Name, req.AvatarURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 		return
